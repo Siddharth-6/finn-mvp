@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.announcements import _safe_attachment, fetch_portfolio_announcements
-from app.financials import build_results_prompt, parse_model_json, validate_results_payload
+from app.financials import build_results_prompt, parse_model_json, rank_financial_chunks, validate_results_payload
 
 load_dotenv()
 
@@ -423,7 +423,7 @@ async def analyze_quarterly_results(req: ResultsAnalysisRequest):
         }
 
     # Keep the prompt bounded while retaining page-level source labels.
-    selected = sources[-30:]
+    selected = rank_financial_chunks(sources, limit=30)
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         return {
