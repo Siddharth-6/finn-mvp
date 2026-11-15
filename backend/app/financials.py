@@ -25,8 +25,8 @@ def rank_financial_chunks(sources: list[dict[str, Any]], limit: int = 30) -> lis
         score = sum(len(re.findall(pattern, text, flags=re.IGNORECASE)) for pattern in patterns)
         ranked.append((score, -index, source))
     ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    chosen = [item[2] for item in ranked[:limit]]
-    return sorted(chosen, key=lambda item: (int(item.get("page", 0)), item.get("filename", "")))
+    # Preserve relevance order: sorting by page number here would undo the ranking.
+    return [item[2] for item in ranked[:limit]]
 
 
 def build_results_prompt(ticker: str, sources: list[dict[str, Any]]) -> str:
