@@ -438,7 +438,7 @@ async def analyze_quarterly_results(req: ResultsAnalysisRequest):
         }
 
     prompt = build_results_prompt(ticker, selected)
-    model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+    model = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
         f"{model}:generateContent?key={api_key}"
@@ -567,7 +567,7 @@ async def research(req: ResearchRequest):
             "status": "retrieved_only",
         }
 
-    model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+    model = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
     prompt = (
         "You are FINN, an investment research assistant. Answer only from the primary-source "
         "excerpts below. Do not use outside knowledge or invent figures. If excerpts do not "
