@@ -99,3 +99,8 @@ The Alerts screen lets the user select a portfolio ticker, configure a daily pri
 ## Environment configuration
 
 Set `GEMINI_API_KEY` in the backend environment to enable evidence-grounded synthesis and quarterly metric extraction. Optionally set `GEMINI_MODEL` to choose a supported Gemini model. Never commit API keys to Git.
+
+
+## Primary-source discovery
+
+The Company Research screen can query the public Screener company page for links labelled annual report, quarterly results, investor presentation and concall/transcript. Screener is treated as an index, not as the evidentiary source for Pull answers. Open the returned company/exchange document and upload the PDF to FINN before asking research questions. Link discovery can be incomplete or unavailable if the public page changes or blocks automated requests.
