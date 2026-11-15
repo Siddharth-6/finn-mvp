@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.announcements import fetch_portfolio_announcements
+from app.financials import build_results_prompt, parse_model_json, validate_results_payload
 
 load_dotenv()
 
@@ -84,6 +85,10 @@ DOCUMENTS: list[dict[str, Any]] = []
 class ResearchRequest(BaseModel):
     ticker: str = Field(min_length=1, max_length=30)
     question: str = Field(min_length=5, max_length=2000)
+
+
+class ResultsAnalysisRequest(BaseModel):
+    ticker: str = Field(min_length=1, max_length=30)
 
 
 class AlertConfig(BaseModel):
@@ -392,6 +397,68 @@ def retrieve(question: str, ticker: str, limit: int = 5):
             scored.append((score, document))
     scored.sort(key=lambda item: item[0], reverse=True)
     return [document for _, document in scored[:limit]]
+
+
+@app.post("/api/results/analyze")
+async def analyze_quarterly_results(req: ResultsAnalysisRequest):
+    """Extract quarterly headline metrics only from uploaded primary-source PDFs."""
+    ticker = _ticker(req.ticker)
+    sources = [
+        item for item in DOCUMENTS
+        if item.get("ticker", "").upper() == ticker
+    ]
+    if not sources:
+        return {
+            "ticker": ticker,
+            "status": "needs_documents",
+            "message": "Upload this company's quarterly results filing or annual report PDF first.",
+            "metrics": {},
+            "sources": [],
+        }
+
+    # Keep the prompt bounded while retaining page-level source labels.
+    selected = sources[-30:]
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return {
+            "ticker": ticker,
+            "status": "retrieved_only",
+            "message": "Relevant uploaded source text is available, but GEMINI_API_KEY is not configured for structured extraction.",
+            "metrics": {},
+            "sources": [
+                {"document": item["filename"], "page": item["page"], "excerpt": item["text"][:700]}
+                for item in selected[:12]
+            ],
+        }
+
+    prompt = build_results_prompt(ticker, selected)
+    model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{model}:generateContent?key={api_key}"
+    )
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.post(
+            url,
+            json={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "temperature": 0,
+                    "maxOutputTokens": 3000,
+                    "responseMimeType": "application/json",
+                },
+            },
+        )
+    if response.status_code >= 400:
+        raise HTTPException(502, f"Financial extraction provider error: {response.text[:250]}")
+    try:
+        model_text = response.json()["candidates"][0]["content"]["parts"][0]["text"]
+        extracted = parse_model_json(model_text)
+        result = validate_results_payload(extracted, ticker, selected)
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        raise HTTPException(502, f"Could not validate financial extraction: {str(exc)[:180]}")
+    result["status"] = "extracted"
+    return result
 
 
 @app.post("/api/research")
