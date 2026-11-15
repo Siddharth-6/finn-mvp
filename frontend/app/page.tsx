@@ -189,6 +189,17 @@ export default function Home() {
   }, [tab, autoWatch, alertTicker, alertPct, alertVol, averageDays]);
 
   const highCount = announcements.filter(a => a.priority === 'high').length;
+  const researchPrompts = [
+    ['Business snapshot', 'Summarize the business segments, products and revenue mix described in the uploaded primary sources.'],
+    ['Financial snapshot', 'Summarize the latest reported revenue, margins, PAT and key financial ratios. Cite the source pages.'],
+    ['Trajectory', 'Analyze the multi-year trajectory in revenue, margins and profitability. What is growing or compressing?'],
+    ['Balance sheet', 'Assess debt, leverage, working capital and funding structure from the uploaded reports.'],
+    ['Cash quality', 'Compare accounting profit with operating cash flow and free cash flow. Is profit converting into cash?'],
+    ['Narrative vs numbers', 'Compare management commentary with reported financial performance. Where do they agree or diverge?'],
+    ['Guidance', 'Extract management guidance on growth, margins and capex. Separate explicit guidance from general commentary.'],
+    ['Bull vs bear', 'Present the strongest evidence-backed bull case and bear case using only the uploaded primary sources.'],
+    ['Promises vs delivery', 'Across the last four available quarters, compare management growth and margin guidance with the reported outcomes.'],
+  ] as const;
   const nav = [
     ['Overview', LayoutDashboard], ['Smart Digest', Bell], ['Company Research', BookOpen],
     ['Alerts', Activity], ['Documents', FileText],
@@ -267,7 +278,7 @@ export default function Home() {
           </div>}
 
           {tab === 'Company Research' && <div className="grid gap-5 lg:grid-cols-2">
-            <div className="panel p-5 sm:p-6"><div className="mb-5 flex items-center gap-2"><Search className="text-lime-300"/><h2 className="font-semibold">Research a company</h2></div><label className="mb-2 block text-xs text-slate-400">NSE/BSE ticker</label><input className="field mb-4" value={ticker} onChange={e => setTicker(e.target.value.toUpperCase())}/><label className="mb-2 block text-xs text-slate-400">Research question</label><textarea className="field min-h-[120px]" value={question} onChange={e => setQuestion(e.target.value)}/><button disabled={busy} onClick={runResearch} className="btn btn-primary mt-4 w-full disabled:opacity-50">{busy ? 'Researching…' : 'Research from primary sources'} <Sparkles className="ml-1 inline" size={14}/></button><p className="mt-4 text-xs leading-5 text-slate-500">Upload primary-source documents first. FINN will not invent missing evidence.</p><button onClick={() => setTab('Documents')} className="btn btn-ghost mt-3 w-full"><UploadCloud className="mr-2 inline" size={14}/>Upload company documents</button></div>
+            <div className="panel p-5 sm:p-6"><div className="mb-5 flex items-center gap-2"><Search className="text-lime-300"/><h2 className="font-semibold">Research a company</h2></div><label className="mb-2 block text-xs text-slate-400">NSE/BSE ticker</label><input className="field mb-4" value={ticker} onChange={e => setTicker(e.target.value.toUpperCase())}/><label className="mb-2 block text-xs text-slate-400">Research question</label><textarea className="field min-h-[120px]" value={question} onChange={e => setQuestion(e.target.value)}/><div className="mt-4"><div className="mb-2 text-xs font-semibold text-slate-400">Research angles</div><div className="flex flex-wrap gap-2">{researchPrompts.map(([label, prompt]) => <button key={label} type="button" onClick={() => setQuestion(prompt)} className="rounded-full border border-slate-700 px-3 py-1.5 text-[10px] text-slate-400 transition hover:border-lime-400/50 hover:text-lime-300">{label}</button>)}</div></div><button disabled={busy} onClick={runResearch} className="btn btn-primary mt-4 w-full disabled:opacity-50">{busy ? 'Researching…' : 'Research from primary sources'} <Sparkles className="ml-1 inline" size={14}/></button><p className="mt-4 text-xs leading-5 text-slate-500">Upload primary-source documents first. FINN will not invent missing evidence.</p><button onClick={() => setTab('Documents')} className="btn btn-ghost mt-3 w-full"><UploadCloud className="mr-2 inline" size={14}/>Upload company documents</button></div>
             <div className="panel min-h-[350px] p-5 sm:p-6"><h2 className="font-semibold">Research output</h2>{research ? <><div className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-300">{research.answer}</div>{research.sources?.map((source: any, i: number) => <div key={i} className="mt-3 rounded-lg bg-slate-950/50 p-3"><div className="text-xs font-semibold text-lime-300">{source.document} · page {source.page}</div><p className="mt-2 text-xs text-slate-500">{source.excerpt}</p></div>)}</> : <div className="mt-20 text-center text-sm text-slate-500">Your evidence-grounded research will appear here.</div>}</div>
           </div>}
 
