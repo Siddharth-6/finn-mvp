@@ -64,8 +64,8 @@ def _valid_observation(value: Any, page_texts: dict[int, str]) -> dict[str, Any]
 
     # Require the reported number and most evidence words to occur on the
     # cited uploaded page. This rejects unsupported model-generated values.
-    digits = re.sub(r"\\D", "", f"{number:g}")
-    evidence_digits = re.sub(r"\\D", "", evidence)
+    digits = re.sub(r"\D", "", f"{number:g}")
+    evidence_digits = re.sub(r"\D", "", evidence)
     if not digits or digits not in evidence_digits:
         return None
     evidence_words = set(re.findall(r"[a-z0-9]+", evidence.lower()))
