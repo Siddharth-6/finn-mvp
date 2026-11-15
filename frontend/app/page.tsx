@@ -39,6 +39,7 @@ export default function Home() {
   const [marketError, setMarketError] = useState('');
   const [alertTicker, setAlertTicker] = useState('RELIANCE.NS');
   const [averageDays, setAverageDays] = useState('20');
+  const [autoWatch, setAutoWatch] = useState(true);
   const [alertPct, setAlertPct] = useState('3');
   const [alertVol, setAlertVol] = useState('2');
   const [alertResult, setAlertResult] = useState<any>(null);
@@ -155,10 +156,37 @@ export default function Home() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || 'Could not evaluate');
-      setAlertResult(data);
-    } catch (error: any) { setAlertResult({ error: error.message }); }
+      setAlertResult({ ...data, checked_at: new Date().toISOString() });
+    } catch (error: any) { setAlertResult({ error: error.message, checked_at: new Date().toISOString() }); }
     finally { setBusy(false); }
   }
+
+  useEffect(() => {
+    if (tab !== 'Alerts' || !autoWatch) return;
+    // End-of-day market data is cached by the API for 15 minutes. Polling at
+    // that cadence avoids hammering the upstream provider.
+    const check = async () => {
+      try {
+        const response = await fetch(`${getApiBase()}/api/alerts/evaluate`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ticker: alertTicker,
+            price_change_pct: Number(alertPct),
+            volume_multiple: Number(alertVol),
+            average_days: Number(averageDays),
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || 'Alert check unavailable');
+        setAlertResult({ ...data, checked_at: new Date().toISOString() });
+      } catch (error: any) {
+        setAlertResult({ error: error.message, checked_at: new Date().toISOString() });
+      }
+    };
+    void check();
+    const timer = window.setInterval(check, 15 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [tab, autoWatch, alertTicker, alertPct, alertVol, averageDays]);
 
   const highCount = announcements.filter(a => a.priority === 'high').length;
   const nav = [
@@ -244,8 +272,8 @@ export default function Home() {
           </div>}
 
           {tab === 'Alerts' && <div className="grid gap-5 lg:grid-cols-2">
-            <div className="panel p-5 sm:p-6"><h2 className="font-semibold">Configure market triggers</h2><p className="mt-1 text-xs text-slate-500">Evaluate thresholds against the latest available daily data.</p><label className="mb-2 mt-5 block text-xs text-slate-400">Portfolio company</label><select className="field" value={alertTicker} onChange={e => setAlertTicker(e.target.value)}>{portfolio.map(company => <option key={company.ticker} value={company.ticker}>{company.name} · {company.ticker}</option>)}</select><label className="mb-2 mt-4 block text-xs text-slate-400">Daily price move threshold (±%)</label><input className="field" type="number" min="0.1" step="0.1" value={alertPct} onChange={e => setAlertPct(e.target.value)}/><label className="mb-2 mt-4 block text-xs text-slate-400">Volume spike threshold (×)</label><input className="field" type="number" min="1" step="0.1" value={alertVol} onChange={e => setAlertVol(e.target.value)}/><label className="mb-2 mt-4 block text-xs text-slate-400">Volume baseline (trading days)</label><input className="field" type="number" min="2" max="250" value={averageDays} onChange={e => setAverageDays(e.target.value)}/><button disabled={busy} onClick={evaluateAlert} className="btn btn-primary mt-5 w-full">{busy ? 'Evaluating…' : 'Evaluate Reliance alerts'}</button></div>
-            <div className="panel p-5 sm:p-6"><h2 className="font-semibold">Latest evaluation</h2>{alertResult ? alertResult.error ? <p className="mt-4 text-sm text-rose-300">{alertResult.error}</p> : <><span className="pill mt-4 inline-block">{alertResult.triggered ? 'Threshold crossed' : 'No threshold crossed'}</span><div className="mt-4 space-y-2">{alertResult.reasons.length ? alertResult.reasons.map((reason: string, i: number) => <div key={i} className="rounded-lg bg-slate-950/50 p-3 text-sm">{reason}</div>) : <p className="text-sm text-slate-400">No configured alert condition was met.</p>}</div><p className="mt-4 text-xs text-slate-500">Evaluation mode: {alertResult.evaluation_mode}</p></> : <div className="mt-20 text-center text-xs text-slate-500">Run an evaluation to see whether thresholds were crossed.</div>}</div>
+            <div className="panel p-5 sm:p-6"><h2 className="font-semibold">Configure market triggers</h2><p className="mt-1 text-xs text-slate-500">Evaluate thresholds against the latest available daily data.</p><label className="mt-4 flex items-center gap-2 text-xs text-slate-400"><input type="checkbox" checked={autoWatch} onChange={e => setAutoWatch(e.target.checked)}/> Auto-watch while this screen is open (checks every 15 minutes)</label><label className="mb-2 mt-5 block text-xs text-slate-400">Portfolio company</label><select className="field" value={alertTicker} onChange={e => setAlertTicker(e.target.value)}>{portfolio.map(company => <option key={company.ticker} value={company.ticker}>{company.name} · {company.ticker}</option>)}</select><label className="mb-2 mt-4 block text-xs text-slate-400">Daily price move threshold (±%)</label><input className="field" type="number" min="0.1" step="0.1" value={alertPct} onChange={e => setAlertPct(e.target.value)}/><label className="mb-2 mt-4 block text-xs text-slate-400">Volume spike threshold (×)</label><input className="field" type="number" min="1" step="0.1" value={alertVol} onChange={e => setAlertVol(e.target.value)}/><label className="mb-2 mt-4 block text-xs text-slate-400">Volume baseline (trading days)</label><input className="field" type="number" min="2" max="250" value={averageDays} onChange={e => setAverageDays(e.target.value)}/><button disabled={busy} onClick={evaluateAlert} className="btn btn-primary mt-5 w-full">{busy ? 'Evaluating…' : 'Evaluate Reliance alerts'}</button></div>
+            <div className="panel p-5 sm:p-6"><h2 className="font-semibold">Latest evaluation</h2>{alertResult ? alertResult.error ? <p className="mt-4 text-sm text-rose-300">{alertResult.error}</p> : <><span className="pill mt-4 inline-block">{alertResult.triggered ? 'Threshold crossed' : 'No threshold crossed'}</span><div className="mt-4 space-y-2">{alertResult.reasons.length ? alertResult.reasons.map((reason: string, i: number) => <div key={i} className="rounded-lg bg-slate-950/50 p-3 text-sm">{reason}</div>) : <p className="text-sm text-slate-400">No configured alert condition was met.</p>}</div><p className="mt-4 text-xs text-slate-500">Evaluation mode: {alertResult.evaluation_mode}</p><p className="mt-1 text-[10px] text-slate-600">Last checked: {alertResult.checked_at ? new Date(alertResult.checked_at).toLocaleString() : '—'}</p></> : <div className="mt-20 text-center text-xs text-slate-500">Run an evaluation to see whether thresholds were crossed.</div>}</div>
           </div>}
 
           {tab === 'Documents' && <div className="grid gap-5 lg:grid-cols-2"><div className="panel p-5 sm:p-6"><div className="mb-4 flex items-center gap-2"><UploadCloud className="text-lime-300"/><h2 className="font-semibold">Add primary-source documents</h2></div><p className="mb-5 text-xs leading-5 text-slate-500">Upload annual reports, quarterly results or earnings-call transcripts as PDF. Scanned-PDF OCR is not enabled.</p><label className="mb-2 block text-xs text-slate-400">Company ticker</label><input className="field mb-4" value={uploadTicker} onChange={e => setUploadTicker(e.target.value.toUpperCase())}/><label className="mb-2 block text-xs text-slate-400">PDF document</label><input className="field" type="file" accept="application/pdf" onChange={e => setFile(e.target.files?.[0] || null)}/><button disabled={!file || busy} onClick={upload} className="btn btn-primary mt-4 w-full disabled:opacity-50">{busy ? 'Processing…' : 'Upload and index PDF'}</button>{uploadStatus && <p className="mt-3 text-xs text-lime-300">{uploadStatus}</p>}<div className="mt-6 border-t border-slate-800 pt-5"><h3 className="font-semibold">Quarterly results intelligence</h3><p className="mt-2 text-xs leading-5 text-slate-500">Extract Revenue, EBITDA, PBT and PAT for the latest quarter and available QoQ / YoY comparators from uploaded source PDFs. Figures without page evidence are discarded.</p><button disabled={busy} onClick={analyzeResults} className="btn btn-ghost mt-4 w-full disabled:opacity-50">{busy ? 'Analyzing…' : 'Analyze uploaded quarterly results'}</button>{resultsAnalysis && <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/40 p-4"><div className="text-sm font-semibold">{resultsAnalysis.status === 'extracted' ? 'Extraction complete' : resultsAnalysis.status === 'needs_documents' ? 'Upload a source document first' : 'Results analysis'}</div><p className="mt-2 text-xs leading-5 text-slate-400">{resultsAnalysis.message || resultsAnalysis.disclaimer}</p>{resultsAnalysis.metrics && Object.keys(resultsAnalysis.metrics).length > 0 && <><div className="mt-3 text-[10px] text-slate-500">{resultsAnalysis.basis} · {resultsAnalysis.unit || 'unit not identified'} · {resultsAnalysis.periods?.current_quarter || 'Current quarter'}</div><div className="mt-3 space-y-3">{Object.entries(resultsAnalysis.metrics).map(([metric, values]: [string, any]) => <div key={metric} className="rounded-lg border border-slate-800 p-3"><div className="text-xs font-semibold uppercase text-lime-300">{metric}</div><div className="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4"><div><div className="text-slate-500">Current</div><div>{values.current_quarter?.value ?? '—'}</div></div><div><div className="text-slate-500">Previous Q</div><div>{values.previous_quarter?.value ?? '—'}</div></div><div><div className="text-slate-500">QoQ</div><div>{values.qoq_change_pct == null ? '—' : `${values.qoq_change_pct}%`}</div></div><div><div className="text-slate-500">YoY</div><div>{values.yoy_change_pct == null ? '—' : `${values.yoy_change_pct}%`}</div></div></div>{values.current_quarter?.page && <div className="mt-2 text-[10px] text-slate-500">Current value evidence: {values.current_quarter.evidence} · page {values.current_quarter.page}</div>}</div>)}</div><p className="mt-3 text-[10px] leading-4 text-amber-300">{resultsAnalysis.disclaimer}</p></>}{resultsAnalysis.sources?.map((source: any, i: number) => <div key={i} className="mt-3 rounded-lg bg-slate-950/50 p-3"><div className="text-xs font-semibold text-lime-300">{source.document} · page {source.page}</div><p className="mt-2 text-xs leading-5 text-slate-500">{source.excerpt}</p></div>)}}</div>}</div></div><div className="panel p-5 sm:p-6"><h2 className="font-semibold">Source discipline</h2><div className="mt-4 space-y-3 text-xs leading-5 text-slate-400"><div className="rounded-lg bg-slate-950/50 p-3"><span className="font-semibold text-lime-300">Allowed for Pull</span><br/>Annual reports, quarterly results, company filings, investor presentations and earnings-call transcripts.</div><div className="rounded-lg bg-slate-950/50 p-3"><span className="font-semibold text-rose-300">Not used for Pull</span><br/>Broker notes, news articles, secondary research and unsupported model knowledge.</div><p>Uploaded text is held in the running backend process. Restarting the backend clears its in-memory index.</p></div></div></div>}
