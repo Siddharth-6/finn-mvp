@@ -14,8 +14,8 @@ def rank_financial_chunks(sources: list[dict[str, Any]], limit: int = 30) -> lis
     patterns = (
         r"revenue|income from operations|total income",
         r"ebitda|operating profit",
-        r"profit before tax|\\bpbt\\b",
-        r"profit after tax|\\bpat\\b|net profit",
+        r"profit before tax|\bpbt\b",
+        r"profit after tax|\bpat\b|net profit",
         r"quarter ended|three months ended|year ended",
         r"consolidated|standalone",
     )
