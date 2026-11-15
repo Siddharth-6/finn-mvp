@@ -273,7 +273,7 @@ export default function Home() {
           {tab === 'Smart Digest' && <div className="panel p-5 sm:p-6">
             <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
               <div><h2 className="font-semibold">Portfolio announcement digest</h2><p className="mt-1 text-xs text-slate-500">NSE corporate filings · newest material items first</p></div>
-              <span className="pill">{announcementMode === 'live' ? 'Live NSE source' : announcementMode.replace(/_/g, ' ')}</span>
+              <span className="pill">{announcementMode === 'live' ? (announcementErrors.length > 0 ? 'RSS fallback · degraded' : 'Live NSE source') : announcementMode.replace(/_/g, ' ')}</span>
             </div>
             <div className="mb-5 grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
               <label className="text-xs text-slate-400">Time window
