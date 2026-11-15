@@ -16,6 +16,8 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from app.announcements import fetch_portfolio_announcements
+
 load_dotenv()
 
 app = FastAPI(
@@ -258,13 +260,50 @@ def evaluate_alert(config: AlertConfig):
     }
 
 
+ANNOUNCEMENT_CACHE: dict[str, dict[str, Any]] = {}
+ANNOUNCEMENT_CACHE_TTL_SECONDS = 5 * 60
+
+
 @app.get("/api/announcements")
-def announcements(demo: bool = True):
-    return {
-        "items": DEMO_ANNOUNCEMENTS if demo else [],
-        "mode": "demo_examples" if demo else "no_live_feed_configured",
-        "note": "Demo examples are not real corporate filings. No live NSE/BSE feed is configured.",
+def announcements(
+    hours: int = 24,
+    include_routine: bool = True,
+    demo: bool = False,
+):
+    """Return a portfolio-scoped, time-windowed NSE announcement digest.
+
+    Live mode is the default. Demo cards are returned only when explicitly
+    requested with demo=true, and are always labelled as illustrative.
+    """
+    if hours < 1 or hours > 720:
+        raise HTTPException(400, "hours must be between 1 and 720")
+
+    if demo:
+        return {
+            "items": DEMO_ANNOUNCEMENTS,
+            "mode": "demo_examples",
+            "source": None,
+            "window_hours": hours,
+            "note": "Illustrative examples only; these are not real company disclosures.",
+        }
+
+    cache_key = f"{hours}:{include_routine}"
+    now = time.monotonic()
+    cached = ANNOUNCEMENT_CACHE.get(cache_key)
+    if cached and now - cached["cached_at"] < ANNOUNCEMENT_CACHE_TTL_SECONDS:
+        return {**cached["payload"], "cache_status": "fresh_cache"}
+
+    result = fetch_portfolio_announcements(
+        tickers=[company["ticker"] for company in PORTFOLIO],
+        hours=hours,
+        include_routine=include_routine,
+    )
+    result["cache_status"] = "live_fetch"
+    ANNOUNCEMENT_CACHE[cache_key] = {
+        "cached_at": now,
+        "payload": result,
     }
+    return result
 
 
 @app.post("/api/documents/upload")
