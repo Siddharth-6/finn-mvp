@@ -34,6 +34,34 @@ def test_normalize_nse_row_creates_real_source_metadata():
     assert item["source_url"].startswith("https://nsearchives.nseindia.com/")
 
 
+def test_rss_symbol_is_resolved_from_attachment_filename(monkeypatch):
+    class FakeResponse:
+        content = b"""<?xml version="1.0"?><rss><channel><item>
+        <title>Tata Consultancy Services Limited</title>
+        <description>Outcome of board meeting</description>
+        <link>https://nsearchives.nseindia.com/corporate/TCS_15112026123456_Outcome.pdf</link>
+        <pubDate>Sun, 15 Nov 2026 10:00:00 +0530</pubDate>
+        </item></channel></rss>"""
+        def raise_for_status(self):
+            pass
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+        def get(self, url):
+            return FakeResponse()
+
+    monkeypatch.setattr(feed.httpx, "Client", FakeClient)
+    items = feed._fetch_nse_rss({"TCS", "INFY"})
+    assert len(items) == 1
+    assert items[0]["ticker"] == "TCS"
+    assert items[0]["company"] == "TCS"
+
+
 def test_reject_non_nse_attachment_url():
     assert feed._safe_attachment("https://example.com/file.pdf") is None
     assert feed._safe_attachment("javascript:alert(1)") is None
