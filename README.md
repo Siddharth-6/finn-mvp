@@ -77,15 +77,15 @@ GitHub Actions runs backend tests and a frontend production build on pushes and 
 
 ## Quarterly results intelligence
 
-1. Upload a company's quarterly results PDF in **Documents**, using its NSE/BSE ticker.
-2. Select **Analyze uploaded quarterly results**.
+1. In **Smart Digest**, use **Analyze results** on an NSE quarterly-results filing card to fetch and analyze its original PDF automatically. Alternatively, upload a company's results PDF in **Documents**.
+2. Select **Analyze uploaded quarterly results** when working from an uploaded PDF.
 3. When `GEMINI_API_KEY` is configured, FINN asks the configured Gemini model to extract Revenue, EBITDA, PBT and PAT for the current quarter, previous quarter and year-ago quarter.
 4. FINN calculates QoQ and YoY percentage changes itself. Each observation is accepted only when the cited page exists in the uploaded document and the quoted evidence contains the reported number and matching source text.
 5. Missing or unsupported periods remain blank. Verify every extracted value against the original filing before relying on it.
 
 Without `GEMINI_API_KEY`, the endpoint returns relevant uploaded excerpts and does not invent extracted figures.
 
-Endpoint: `POST /api/results/analyze` with JSON body `{"ticker":"TCS.NS"}`.
+Endpoints: `POST /api/results/analyze` with JSON body `{"ticker":"TCS.NS"}`, or `POST /api/results/analyze-filing` with `{"ticker":"TCS.NS","source_url":"https://...NSE-hosted-PDF..."}`. The filing route accepts only HTTPS URLs on NSE's approved archive/website hosts.
 
 ## Configurable market alerts
 
