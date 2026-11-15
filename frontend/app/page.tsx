@@ -6,7 +6,21 @@ import {
   FileText, LayoutDashboard, Search, ShieldCheck, Sparkles, UploadCloud,
 } from 'lucide-react';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+function getApiBase() {
+  const configured = process.env.NEXT_PUBLIC_API_URL?.trim();
+  // 0.0.0.0 is a bind address, not a browser-reachable API hostname.
+  if (configured && !configured.includes('0.0.0.0')) {
+    return configured.replace(/\\/$/, '');
+  }
+  if (typeof window !== 'undefined') {
+    // Codespaces exposes each forwarded port on a matching *.app.github.dev host.
+    return window.location.origin.replace(
+      /-3000\\.app\\.github\\.dev$/,
+      '-8000.app.github.dev'
+    );
+  }
+  return 'http://localhost:8000';
+}
 type Company = { ticker: string; name: string; sector: string };
 type Announcement = {
   id: string; ticker: string; company: string; category: string; title: string;
@@ -37,8 +51,8 @@ export default function Home() {
   const [alertResult, setAlertResult] = useState<any>(null);
 
   useEffect(() => {
-    fetch(`${API}/health`).then(r => r.ok ? setApiStatus('Connected') : setApiStatus('Unavailable')).catch(() => setApiStatus('Offline'));
-    fetch(`${API}/api/portfolio`).then(r => r.json()).then(d => setPortfolio(d.items || [])).catch(() => {});
+    fetch(`${getApiBase()}/health`).then(r => r.ok ? setApiStatus('Connected') : setApiStatus('Unavailable')).catch(() => setApiStatus('Offline'));
+    fetch(`${getApiBase()}/api/portfolio`).then(r => r.json()).then(d => setPortfolio(d.items || [])).catch(() => {});
     loadAnnouncements('24', true);
   }, []);
 
@@ -51,7 +65,7 @@ export default function Home() {
     setAnnouncementNote('');
     try {
       const params = new URLSearchParams({ hours, include_routine: String(routine) });
-      const response = await fetch(`${API}/api/announcements?${params.toString()}`);
+      const response = await fetch(`${getApiBase()}/api/announcements?${params.toString()}`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || 'Announcement feed unavailable');
       setAnnouncements(data.items || []);
@@ -67,7 +81,7 @@ export default function Home() {
   async function loadMarket(symbol: string) {
     setMarketError('');
     try {
-      const response = await fetch(`${API}/api/market/${encodeURIComponent(symbol)}`);
+      const response = await fetch(`${getApiBase()}/api/market/${encodeURIComponent(symbol)}`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || 'Market data unavailable');
       setMarket(data);
@@ -80,7 +94,7 @@ export default function Home() {
   async function runResearch() {
     setBusy(true); setResearch(null);
     try {
-      const response = await fetch(`${API}/api/research`, {
+      const response = await fetch(`${getApiBase()}/api/research`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticker, question }),
       });
@@ -97,7 +111,7 @@ export default function Home() {
     setBusy(true); setUploadStatus('Uploading and extracting PDF…');
     const form = new FormData(); form.append('file', file);
     try {
-      const response = await fetch(`${API}/api/documents/upload?ticker=${encodeURIComponent(uploadTicker)}`, { method: 'POST', body: form });
+      const response = await fetch(`${getApiBase()}/api/documents/upload?ticker=${encodeURIComponent(uploadTicker)}`, { method: 'POST', body: form });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || 'Upload failed');
       setUploadStatus(`Indexed ${data.chunks_added} text chunks from ${data.pages} pages.`);
@@ -109,7 +123,7 @@ export default function Home() {
   async function evaluateAlert() {
     setBusy(true); setAlertResult(null);
     try {
-      const response = await fetch(`${API}/api/alerts/evaluate`, {
+      const response = await fetch(`${getApiBase()}/api/alerts/evaluate`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticker: 'RELIANCE.NS', price_change_pct: Number(alertPct), volume_multiple: Number(alertVol) }),
       });
