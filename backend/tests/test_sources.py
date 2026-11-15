@@ -9,9 +9,9 @@ def test_screener_source_parser_keeps_primary_document_links():
     <a href="javascript:alert(1)">Investor Presentation</a>
     """
     links = extract_primary_document_links(html, "https://www.screener.in/company/TCS/")
-    assert len(links) == 1
-    assert links[0]["category"] == "annual_report"
-    assert links[0]["host"] == "www.example.com"
+    assert len(links) == 2
+    assert {item["category"] for item in links} == {"annual_report", "concall_transcript"}
+    assert next(item for item in links if item["category"] == "annual_report")["host"] == "www.example.com"
 
 
 def test_screener_source_parser_allows_pdf_link_on_screener_host():
