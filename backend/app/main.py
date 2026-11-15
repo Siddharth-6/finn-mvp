@@ -483,6 +483,11 @@ async def analyze_results_filing(req: ResultsFilingRequest):
         ) as client:
             response = await client.get(safe_url)
         response.raise_for_status()
+        # Do not allow an NSE URL to redirect the backend to an arbitrary host.
+        redirected_url = _safe_attachment(str(response.url))
+        if not redirected_url:
+            raise HTTPException(400, "NSE filing redirected outside approved exchange hosts.")
+        safe_url = redirected_url
         content = response.content
     except httpx.HTTPError as exc:
         raise HTTPException(502, f"Could not retrieve the NSE filing: {str(exc)[:160]}")
