@@ -58,7 +58,7 @@ def extract_primary_document_links(html: str, base_url: str) -> list[dict[str, A
         parsed = urlparse(url)
         if parsed.scheme != "https" or not parsed.hostname:
             continue
-        if parsed.hostname.endswith("screener.in") and not parsed.path.lower().endswith(".pdf"):
+        if parsed.hostname.endswith("screener.in") and not parsed.path.lower().endswith(".pdf") and category != "concall_transcript":
             continue
         if url in found:
             continue
