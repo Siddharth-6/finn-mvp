@@ -265,15 +265,8 @@ def fetch_portfolio_announcements(
         unique.values(),
         key=lambda item: (
             priority_order.get(item["priority"], 3),
-            item["published_at"] or "",
+            -datetime.fromisoformat(item["published_at"]).timestamp(),
         ),
-        reverse=False,
-    )
-    result.sort(
-        key=lambda item: (
-            priority_order.get(item["priority"], 3),
-            item["published_at"] or "",
-        )
     )
     return {
         "items": result,
