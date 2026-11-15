@@ -105,4 +105,4 @@ Set `GEMINI_API_KEY` in the backend environment to enable evidence-grounded synt
 
 ## Primary-source discovery
 
-The Company Research screen can query the public Screener company page for links labelled annual report, quarterly results, investor presentation and concall/transcript. Screener is treated as an index, not as the evidentiary source for Pull answers. Open the returned company/exchange document and upload the PDF to FINN before asking research questions. Link discovery can be incomplete or unavailable if the public page changes or blocks automated requests.
+The Company Research screen can query the public Screener company page for links labelled annual report, quarterly results, investor presentation and concall/transcript. Screener is treated as an index, not as the evidentiary source for Pull answers. Open the returned link, follow it to the original company/exchange document, and upload the PDF to FINN before asking research questions. Link discovery can be incomplete or unavailable if the public page changes or blocks automated requests.
