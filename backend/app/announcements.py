@@ -186,7 +186,7 @@ def _fetch_nse_rss(symbols: set[str]) -> list[dict[str, Any]]:
         attachment_name = urlparse(link).path.rsplit("/", 1)[-1].upper()
         symbol = ""
         for candidate in sorted(symbols, key=len, reverse=True):
-            if re.match(rf"^{re.escape(candidate)}(?:_|-|\\.|$)", attachment_name):
+            if re.match(rf"^{re.escape(candidate)}(?:[_.-]|$)", attachment_name):
                 symbol = candidate
                 break
         if not symbol:
