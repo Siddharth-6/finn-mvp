@@ -1,0 +1,170 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import {
+  Activity, ArrowDownRight, ArrowUpRight, Bell, BookOpen, BriefcaseBusiness,
+  FileText, LayoutDashboard, Search, ShieldCheck, Sparkles, UploadCloud,
+} from 'lucide-react';
+
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+type Company = { ticker: string; name: string; sector: string };
+type Announcement = {
+  id: string; ticker: string; company: string; category: string; title: string;
+  summary: string; priority: string; published_at: string; is_demo: boolean;
+};
+
+export default function Home() {
+  const [tab, setTab] = useState('Overview');
+  const [portfolio, setPortfolio] = useState<Company[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [apiStatus, setApiStatus] = useState('Connecting');
+  const [ticker, setTicker] = useState('TCS.NS');
+  const [question, setQuestion] = useState('What does management say about growth outlook and key risks?');
+  const [research, setResearch] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const [uploadTicker, setUploadTicker] = useState('TCS.NS');
+  const [file, setFile] = useState<File | null>(null);
+  const [uploadStatus, setUploadStatus] = useState('');
+  const [market, setMarket] = useState<any>(null);
+  const [marketError, setMarketError] = useState('');
+  const [alertPct, setAlertPct] = useState('3');
+  const [alertVol, setAlertVol] = useState('2');
+  const [alertResult, setAlertResult] = useState<any>(null);
+
+  useEffect(() => {
+    fetch(`${API}/health`).then(r => r.ok ? setApiStatus('Connected') : setApiStatus('Unavailable')).catch(() => setApiStatus('Offline'));
+    fetch(`${API}/api/portfolio`).then(r => r.json()).then(d => setPortfolio(d.items || [])).catch(() => {});
+    fetch(`${API}/api/announcements`).then(r => r.json()).then(d => setAnnouncements(d.items || [])).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (tab === 'Overview' || tab === 'Alerts') loadMarket('RELIANCE.NS');
+  }, [tab]);
+
+  async function loadMarket(symbol: string) {
+    setMarketError('');
+    try {
+      const response = await fetch(`${API}/api/market/${encodeURIComponent(symbol)}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Market data unavailable');
+      setMarket(data);
+    } catch (error: any) {
+      setMarketError(error.message);
+      setMarket(null);
+    }
+  }
+
+  async function runResearch() {
+    setBusy(true); setResearch(null);
+    try {
+      const response = await fetch(`${API}/api/research`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker, question }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Research failed');
+      setResearch(data);
+    } catch (error: any) {
+      setResearch({ answer: error.message, sources: [], grounded: false });
+    } finally { setBusy(false); }
+  }
+
+  async function upload() {
+    if (!file) return;
+    setBusy(true); setUploadStatus('Uploading and extracting PDF…');
+    const form = new FormData(); form.append('file', file);
+    try {
+      const response = await fetch(`${API}/api/documents/upload?ticker=${encodeURIComponent(uploadTicker)}`, { method: 'POST', body: form });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Upload failed');
+      setUploadStatus(`Indexed ${data.chunks_added} text chunks from ${data.pages} pages.`);
+      setFile(null);
+    } catch (error: any) { setUploadStatus(error.message); }
+    finally { setBusy(false); }
+  }
+
+  async function evaluateAlert() {
+    setBusy(true); setAlertResult(null);
+    try {
+      const response = await fetch(`${API}/api/alerts/evaluate`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker: 'RELIANCE.NS', price_change_pct: Number(alertPct), volume_multiple: Number(alertVol) }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Could not evaluate');
+      setAlertResult(data);
+    } catch (error: any) { setAlertResult({ error: error.message }); }
+    finally { setBusy(false); }
+  }
+
+  const highCount = announcements.filter(a => a.priority === 'high').length;
+  const nav = [
+    ['Overview', LayoutDashboard], ['Smart Digest', Bell], ['Company Research', BookOpen],
+    ['Alerts', Activity], ['Documents', FileText],
+  ] as const;
+
+  return (
+    <main className="min-h-screen">
+      <div className="mx-auto flex min-h-screen max-w-[1440px]">
+        <aside className="hidden w-[245px] shrink-0 border-r border-slate-800/80 px-5 py-7 lg:block">
+          <div className="mb-10 flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-lime-400 text-slate-950 font-black text-xl">F</div>
+            <div><div className="text-xl font-black tracking-[.18em]">FINN</div><div className="text-[9px] tracking-[.2em] text-slate-500">INVESTMENT INTELLIGENCE</div></div>
+          </div>
+          <div className="mb-3 px-3 text-[10px] font-bold uppercase tracking-[.18em] text-slate-600">Workspace</div>
+          <nav className="space-y-1">{nav.map(([label, Icon]) => (
+            <button key={label} onClick={() => setTab(label)} className={`navitem w-full ${tab === label ? 'active' : ''}`}>
+              <Icon size={17}/>{label}{label === 'Smart Digest' && highCount > 0 && <span className="ml-auto rounded-full bg-lime-300 px-2 py-0.5 text-[10px] font-bold text-slate-950">{highCount}</span>}
+            </button>
+          ))}</nav>
+          <div className="mt-10 rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+            <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-slate-300"><ShieldCheck size={15} className="text-lime-300"/> Evidence-first AI</div>
+            <p className="text-[11px] leading-5 text-slate-500">Research answers are grounded in uploaded documents. Missing evidence is called out, not guessed.</p>
+          </div>
+        </aside>
+
+        <section className="min-w-0 flex-1 px-4 py-5 sm:px-7 lg:px-10 lg:py-8">
+          <header className="mb-8 flex items-center justify-between">
+            <div className="flex items-center gap-3 lg:hidden"><div className="flex h-9 w-9 items-center justify-center rounded-lg bg-lime-300 font-black text-slate-950">F</div><span className="font-black tracking-[.18em]">FINN</span></div>
+            <div className="hidden lg:block"><div className="text-xs text-slate-500">Investment intelligence workspace</div><div className="mt-1 text-sm font-semibold text-slate-300">Push signals. Pull evidence. Understand businesses.</div></div>
+            <span className={`rounded-full border px-3 py-1.5 text-[10px] ${apiStatus === 'Connected' ? 'border-lime-400/30 text-lime-300' : 'border-amber-500/30 text-amber-300'}`}>● API {apiStatus}</span>
+          </header>
+
+          <div className="mb-7 flex items-end justify-between">
+            <div><div className="mb-2 text-[10px] font-bold uppercase tracking-[.22em] text-lime-300">{tab}</div><h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{tab === 'Overview' ? 'Your investment intelligence workspace' : tab}</h1><p className="mt-2 max-w-2xl text-sm text-slate-500">Surface relevant information and ground research in primary company sources.</p></div>
+            <span className="hidden pill sm:inline-flex">{portfolio.length || 18} companies tracked</span>
+          </div>
+
+          {tab === 'Overview' && <div className="grid gap-5 xl:grid-cols-[1.4fr_1fr]">
+            <div className="panel p-5 sm:p-6">
+              <div className="mb-5 flex items-center justify-between"><div><h2 className="font-semibold">Portfolio pulse</h2><p className="mt-1 text-xs text-slate-500">Latest available daily data · Yahoo Finance</p></div><button onClick={() => loadMarket('RELIANCE.NS')} className="btn btn-ghost">Refresh</button></div>
+              {market ? <div className="grid gap-4 sm:grid-cols-2">
+                <div><div className="text-xs text-slate-500">Reliance Industries · RELIANCE.NS</div><div className="mt-2 metric">₹{Number(market.latest_close).toLocaleString('en-IN')}</div><div className={`mt-2 flex items-center gap-1 text-sm ${market.price_change_pct >= 0 ? 'text-lime-300' : 'text-rose-400'}`}>{market.price_change_pct >= 0 ? <ArrowUpRight size={16}/> : <ArrowDownRight size={16}/>} {market.price_change_pct}% daily move</div></div>
+                <div className="rounded-xl bg-slate-950/50 p-4"><div className="text-xs text-slate-500">Volume vs. 20-day average</div><div className="mt-2 metric">{market.volume_multiple ?? 'N/A'}×</div><div className="mt-1 text-xs text-slate-500">{Number(market.latest_volume).toLocaleString('en-IN')} shares</div></div>
+                <div className="sm:col-span-2 text-[10px] text-slate-600">As of {new Date(market.as_of).toLocaleString()} · {market.source} · {market.cache_status}</div>
+              </div> : <div className="rounded-xl border border-dashed border-slate-700 p-8 text-center text-sm text-slate-500">{marketError || 'Loading market data…'}</div>}
+            </div>
+            <div className="panel p-5 sm:p-6"><div className="mb-4 flex items-center gap-2"><Sparkles className="text-lime-300"/><h2 className="font-semibold">Today’s focus</h2></div><div className="text-sm text-slate-400">Start with material company disclosures, unusual trading activity and changes in business fundamentals.</div><button onClick={() => setTab('Smart Digest')} className="btn btn-ghost mt-5 w-full">Open smart digest</button></div>
+            <div className="panel p-5 sm:p-6 xl:col-span-2"><div className="mb-4 flex items-center justify-between"><h2 className="font-semibold">Watchlist</h2><span className="text-xs text-slate-500">Configured companies</span></div><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{portfolio.map(c => <div key={c.ticker} className="rounded-lg border border-slate-800 bg-slate-950/30 p-3"><div className="text-sm font-semibold">{c.name}</div><div className="mt-1 text-xs text-slate-500">{c.ticker} · {c.sector}</div></div>)}</div></div>
+          </div>}
+
+          {tab === 'Smart Digest' && <div className="panel p-5 sm:p-6"><div className="mb-4 flex items-center justify-between"><div><h2 className="font-semibold">Portfolio announcement digest</h2><p className="mt-1 text-xs text-slate-500">Prioritized company disclosures</p></div><span className="pill">Demo mode</span></div><div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-200">These sample cards are illustrative, not actual NSE/BSE filings. A verified live filing source is not configured.</div><div className="space-y-3">{announcements.map(a => <article key={a.id} className="rounded-xl border border-slate-800 p-4"><div className="flex items-center justify-between gap-3"><div className="font-semibold">{a.company} <span className="ml-1 text-xs font-normal text-slate-500">{a.ticker}</span></div><span className="pill">{a.priority} priority</span></div><h3 className="mt-3 text-sm">{a.title}</h3><p className="mt-2 text-xs leading-5 text-slate-400">{a.summary}</p><div className="mt-3 text-[10px] text-slate-600">{a.category} · {a.published_at} · demo</div></article>)}</div></div>}
+
+          {tab === 'Company Research' && <div className="grid gap-5 lg:grid-cols-2">
+            <div className="panel p-5 sm:p-6"><div className="mb-5 flex items-center gap-2"><Search className="text-lime-300"/><h2 className="font-semibold">Research a company</h2></div><label className="mb-2 block text-xs text-slate-400">NSE/BSE ticker</label><input className="field mb-4" value={ticker} onChange={e => setTicker(e.target.value.toUpperCase())}/><label className="mb-2 block text-xs text-slate-400">Research question</label><textarea className="field min-h-[120px]" value={question} onChange={e => setQuestion(e.target.value)}/><button disabled={busy} onClick={runResearch} className="btn btn-primary mt-4 w-full disabled:opacity-50">{busy ? 'Researching…' : 'Research from primary sources'} <Sparkles className="ml-1 inline" size={14}/></button><p className="mt-4 text-xs leading-5 text-slate-500">Upload primary-source documents first. FINN will not invent missing evidence.</p><button onClick={() => setTab('Documents')} className="btn btn-ghost mt-3 w-full"><UploadCloud className="mr-2 inline" size={14}/>Upload company documents</button></div>
+            <div className="panel min-h-[350px] p-5 sm:p-6"><h2 className="font-semibold">Research output</h2>{research ? <><div className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-300">{research.answer}</div>{research.sources?.map((source: any, i: number) => <div key={i} className="mt-3 rounded-lg bg-slate-950/50 p-3"><div className="text-xs font-semibold text-lime-300">{source.document} · page {source.page}</div><p className="mt-2 text-xs text-slate-500">{source.excerpt}</p></div>)}</> : <div className="mt-20 text-center text-sm text-slate-500">Your evidence-grounded research will appear here.</div>}</div>
+          </div>}
+
+          {tab === 'Alerts' && <div className="grid gap-5 lg:grid-cols-2">
+            <div className="panel p-5 sm:p-6"><h2 className="font-semibold">Configure market triggers</h2><p className="mt-1 text-xs text-slate-500">Evaluate thresholds against the latest available daily data.</p><label className="mb-2 mt-5 block text-xs text-slate-400">Daily price move threshold (±%)</label><input className="field" type="number" min="0.1" step="0.1" value={alertPct} onChange={e => setAlertPct(e.target.value)}/><label className="mb-2 mt-4 block text-xs text-slate-400">Volume vs. 20-day average (×)</label><input className="field" type="number" min="1" step="0.1" value={alertVol} onChange={e => setAlertVol(e.target.value)}/><button disabled={busy} onClick={evaluateAlert} className="btn btn-primary mt-5 w-full">{busy ? 'Evaluating…' : 'Evaluate Reliance alerts'}</button></div>
+            <div className="panel p-5 sm:p-6"><h2 className="font-semibold">Latest evaluation</h2>{alertResult ? alertResult.error ? <p className="mt-4 text-sm text-rose-300">{alertResult.error}</p> : <><span className="pill mt-4 inline-block">{alertResult.triggered ? 'Threshold crossed' : 'No threshold crossed'}</span><div className="mt-4 space-y-2">{alertResult.reasons.length ? alertResult.reasons.map((reason: string, i: number) => <div key={i} className="rounded-lg bg-slate-950/50 p-3 text-sm">{reason}</div>) : <p className="text-sm text-slate-400">No configured alert condition was met.</p>}</div><p className="mt-4 text-xs text-slate-500">Evaluation mode: {alertResult.evaluation_mode}</p></> : <div className="mt-20 text-center text-xs text-slate-500">Run an evaluation to see whether thresholds were crossed.</div>}</div>
+          </div>}
+
+          {tab === 'Documents' && <div className="grid gap-5 lg:grid-cols-2"><div className="panel p-5 sm:p-6"><div className="mb-4 flex items-center gap-2"><UploadCloud className="text-lime-300"/><h2 className="font-semibold">Add primary-source documents</h2></div><p className="mb-5 text-xs leading-5 text-slate-500">Upload annual reports, quarterly results or earnings-call transcripts as PDF. Scanned-PDF OCR is not enabled.</p><label className="mb-2 block text-xs text-slate-400">Company ticker</label><input className="field mb-4" value={uploadTicker} onChange={e => setUploadTicker(e.target.value.toUpperCase())}/><label className="mb-2 block text-xs text-slate-400">PDF document</label><input className="field" type="file" accept="application/pdf" onChange={e => setFile(e.target.files?.[0] || null)}/><button disabled={!file || busy} onClick={upload} className="btn btn-primary mt-4 w-full disabled:opacity-50">{busy ? 'Processing…' : 'Upload and index PDF'}</button>{uploadStatus && <p className="mt-3 text-xs text-lime-300">{uploadStatus}</p>}</div><div className="panel p-5 sm:p-6"><h2 className="font-semibold">Source discipline</h2><div className="mt-4 space-y-3 text-xs leading-5 text-slate-400"><div className="rounded-lg bg-slate-950/50 p-3"><span className="font-semibold text-lime-300">Allowed for Pull</span><br/>Annual reports, quarterly results, company filings, investor presentations and earnings-call transcripts.</div><div className="rounded-lg bg-slate-950/50 p-3"><span className="font-semibold text-rose-300">Not used for Pull</span><br/>Broker notes, news articles, secondary research and unsupported model knowledge.</div><p>Uploaded text is held in the running backend process. Restarting the backend clears its in-memory index.</p></div></div></div>}
+          <footer className="mt-10 border-t border-slate-800/80 pt-5 text-[10px] leading-5 text-slate-600">FINN is an engineering prototype, not investment advice. Market data availability depends on the upstream provider. Demo announcement cards are illustrative and must not be interpreted as real company disclosures.</footer>
+        </section>
+      </div>
+      <div className="fixed bottom-0 left-0 right-0 z-20 flex justify-around border-t border-slate-800 bg-[#081321]/95 px-2 py-2 backdrop-blur lg:hidden">{nav.map(([label, Icon]) => <button key={label} onClick={() => setTab(label)} className={`flex flex-col items-center gap-1 px-2 py-1 text-[9px] ${tab === label ? 'text-lime-300' : 'text-slate-500'}`}><Icon size={17}/>{label === 'Company Research' ? 'Research' : label === 'Smart Digest' ? 'Digest' : label}</button>)}</div>
+    </main>
+  );
+}
