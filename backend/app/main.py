@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import fitz
+import pymupdf
 import httpx
 import yfinance as yf
 from dotenv import load_dotenv
@@ -323,7 +323,7 @@ async def upload_document(file: UploadFile = File(...), ticker: str = ""):
     path = DOC_DIR / f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{safe_name}"
     path.write_bytes(content)
     try:
-        pdf = fitz.open(path)
+        pdf = pymupdf.open(path)
         chunks = []
         for page_no, page in enumerate(pdf, start=1):
             page_text = page.get_text("text").strip()
