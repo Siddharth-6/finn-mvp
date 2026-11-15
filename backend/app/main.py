@@ -127,7 +127,7 @@ def get_portfolio():
     }
 
 
-def _fetch_market_data(symbol: str) -> dict[str, Any]:
+def _fetch_market_data(symbol: str, average_days: int = 20) -> dict[str, Any]:
     hist = yf.Ticker(symbol).history(
         period="3mo", interval="1d", auto_adjust=False
     )
@@ -139,7 +139,10 @@ def _fetch_market_data(symbol: str) -> dict[str, Any]:
 
     latest = hist.iloc[-1]
     previous = hist.iloc[-2] if len(hist) > 1 else latest
-    avg_vol = float(hist["Volume"].tail(20).mean())
+    # Compare today's volume with prior sessions only; including today's
+    # volume in its own baseline dampens genuine spikes.
+    baseline_volumes = hist["Volume"].iloc[:-1].tail(average_days)
+    avg_vol = float(baseline_volumes.mean()) if not baseline_volumes.empty else 0.0
     latest_volume = int(latest["Volume"])
     volume_multiple = latest_volume / avg_vol if avg_vol > 0 else None
     price_change = (
@@ -170,12 +173,15 @@ def _fetch_market_data(symbol: str) -> dict[str, Any]:
 
 
 @app.get("/api/market/{ticker}")
-def market_data(ticker: str):
+def market_data(ticker: str, average_days: int = 20):
     symbol = _ticker(ticker)
+    if average_days < 2 or average_days > 250:
+        raise HTTPException(400, "average_days must be between 2 and 250")
+    cache_key = f"{symbol}:{average_days}"
     now = time.monotonic()
 
     with MARKET_LOCK:
-        cached = MARKET_CACHE.get(symbol)
+        cached = MARKET_CACHE.get(cache_key)
         if cached and now - cached["fetched_at"] < MARKET_CACHE_TTL_SECONDS:
             return {**cached["data"], "cache_status": "fresh_cache"}
 
@@ -192,9 +198,9 @@ def market_data(ticker: str):
             )
 
     try:
-        result = _fetch_market_data(symbol)
+        result = _fetch_market_data(symbol, average_days=average_days)
         with MARKET_LOCK:
-            MARKET_CACHE[symbol] = {"fetched_at": time.monotonic(), "data": result}
+            MARKET_CACHE[cache_key] = {"fetched_at": time.monotonic(), "data": result}
             MARKET_FAILURE_UNTIL.pop(symbol, None)
         return {**result, "cache_status": "live_fetch"}
     except Exception as exc:
@@ -205,7 +211,7 @@ def market_data(ticker: str):
         )
         with MARKET_LOCK:
             MARKET_FAILURE_UNTIL[symbol] = time.monotonic() + MARKET_FAILURE_TTL_SECONDS
-            cached = MARKET_CACHE.get(symbol)
+            cached = MARKET_CACHE.get(cache_key)
         if cached:
             return {
                 **cached["data"],
@@ -239,7 +245,7 @@ def evaluate_alert(config: AlertConfig):
             "is_simulated": True,
         }
     else:
-        data = market_data(symbol)
+        data = market_data(symbol, average_days=config.average_days)
         price_change = data["price_change_pct"]
         volume_multiple = data["volume_multiple"]
 
