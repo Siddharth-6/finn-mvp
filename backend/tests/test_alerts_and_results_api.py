@@ -61,3 +61,11 @@ def test_results_endpoint_requires_uploaded_primary_source():
     response = client.post("/api/results/analyze", json={"ticker": "TCS.NS"})
     assert response.status_code == 200
     assert response.json()["status"] == "needs_documents"
+
+
+def test_results_filing_rejects_non_nse_url_before_network_access():
+    response = client.post(
+        "/api/results/analyze-filing",
+        json={"ticker": "TCS.NS", "source_url": "https://example.com/results.pdf"},
+    )
+    assert response.status_code == 400
