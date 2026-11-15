@@ -1,0 +1,432 @@
+from __future__ import annotations
+
+import os
+import re
+import threading
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+import fitz
+import httpx
+import yfinance as yf
+from dotenv import load_dotenv
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+
+load_dotenv()
+
+app = FastAPI(
+    title="FINN API",
+    version="0.2.0",
+    description="Financial Investment Intelligence prototype",
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+DOC_DIR = DATA_DIR / "documents"
+DOC_DIR.mkdir(parents=True, exist_ok=True)
+
+PORTFOLIO = [
+    {"ticker": "RELIANCE.NS", "name": "Reliance Industries", "sector": "Energy & Retail"},
+    {"ticker": "TCS.NS", "name": "Tata Consultancy Services", "sector": "IT Services"},
+    {"ticker": "INFY.NS", "name": "Infosys", "sector": "IT Services"},
+    {"ticker": "HDFCBANK.NS", "name": "HDFC Bank", "sector": "Banking"},
+    {"ticker": "ICICIBANK.NS", "name": "ICICI Bank", "sector": "Banking"},
+    {"ticker": "SBIN.NS", "name": "State Bank of India", "sector": "Banking"},
+    {"ticker": "HCLTECH.NS", "name": "HCL Technologies", "sector": "IT Services"},
+    {"ticker": "BHARTIARTL.NS", "name": "Bharti Airtel", "sector": "Telecom"},
+    {"ticker": "LT.NS", "name": "Larsen & Toubro", "sector": "Infrastructure"},
+    {"ticker": "SUNPHARMA.NS", "name": "Sun Pharmaceutical", "sector": "Pharma"},
+    {"ticker": "MARUTI.NS", "name": "Maruti Suzuki", "sector": "Auto"},
+    {"ticker": "TATAMOTORS.NS", "name": "Tata Motors", "sector": "Auto"},
+    {"ticker": "HINDUNILVR.NS", "name": "Hindustan Unilever", "sector": "FMCG"},
+    {"ticker": "ITC.NS", "name": "ITC", "sector": "FMCG"},
+    {"ticker": "TITAN.NS", "name": "Titan Company", "sector": "Consumer"},
+    {"ticker": "ULTRACEMCO.NS", "name": "UltraTech Cement", "sector": "Cement"},
+    {"ticker": "ONGC.NS", "name": "ONGC", "sector": "Energy"},
+    {"ticker": "DRREDDY.NS", "name": "Dr. Reddy's Laboratories", "sector": "Pharma"},
+]
+
+# These cards are deliberately marked as examples, never real disclosures.
+DEMO_ANNOUNCEMENTS = [
+    {"id": "demo-1", "ticker": "TCS.NS", "company": "Tata Consultancy Services", "category": "results", "title": "Quarterly results announcement", "summary": "Illustrative filing card. A verified NSE/BSE filing connector is not configured.", "priority": "high", "published_at": "Demo data", "source_url": None, "is_demo": True},
+    {"id": "demo-2", "ticker": "RELIANCE.NS", "company": "Reliance Industries", "category": "capex", "title": "Capacity expansion update", "summary": "Illustrative announcement. No claim is made that this event occurred.", "priority": "medium", "published_at": "Demo data", "source_url": None, "is_demo": True},
+    {"id": "demo-3", "ticker": "INFY.NS", "company": "Infosys", "category": "unclassified", "title": "Routine compliance disclosure", "summary": "Illustrative low-priority item used to demonstrate digest filtering.", "priority": "low", "published_at": "Demo data", "source_url": None, "is_demo": True},
+]
+
+# Process-local cache. A production deployment should use shared persistent cache.
+MARKET_CACHE: dict[str, dict[str, Any]] = {}
+MARKET_FAILURE_UNTIL: dict[str, float] = {}
+MARKET_CACHE_TTL_SECONDS = 15 * 60
+MARKET_FAILURE_TTL_SECONDS = 90
+MARKET_LOCK = threading.Lock()
+
+DOCUMENTS: list[dict[str, Any]] = []
+
+
+class ResearchRequest(BaseModel):
+    ticker: str = Field(min_length=1, max_length=30)
+    question: str = Field(min_length=5, max_length=2000)
+
+
+class AlertConfig(BaseModel):
+    ticker: str = Field(min_length=1, max_length=30)
+    # These are user-configured trigger thresholds.
+    price_change_pct: float = Field(default=3.0, gt=0)
+    volume_multiple: float = Field(default=2.0, gt=0)
+    average_days: int = Field(default=20, ge=2, le=250)
+    # Optional observed values enable deterministic tests without external APIs.
+    observed_price_change_pct: float | None = None
+    observed_volume_multiple: float | None = None
+
+
+def _ticker(value: str) -> str:
+    symbol = value.upper().strip()
+    if not re.fullmatch(r"[A-Z0-9&.-]{1,30}", symbol):
+        raise HTTPException(400, "Invalid ticker format")
+    return symbol
+
+
+@app.get("/")
+def root():
+    return {"service": "FINN API", "docs": "/docs", "health": "/health"}
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "service": "FINN API",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/api/portfolio")
+def get_portfolio():
+    return {
+        "items": PORTFOLIO,
+        "count": len(PORTFOLIO),
+        "mode": "configured_mock_portfolio",
+    }
+
+
+def _fetch_market_data(symbol: str) -> dict[str, Any]:
+    hist = yf.Ticker(symbol).history(
+        period="3mo", interval="1d", auto_adjust=False
+    )
+    if hist.empty:
+        raise ValueError(f"No market data returned for {symbol}")
+    hist = hist.dropna(subset=["Close"])
+    if hist.empty:
+        raise ValueError(f"No valid closing prices found for {symbol}")
+
+    latest = hist.iloc[-1]
+    previous = hist.iloc[-2] if len(hist) > 1 else latest
+    avg_vol = float(hist["Volume"].tail(20).mean())
+    latest_volume = int(latest["Volume"])
+    volume_multiple = latest_volume / avg_vol if avg_vol > 0 else None
+    price_change = (
+        (float(latest["Close"]) / float(previous["Close"]) - 1) * 100
+        if float(previous["Close"]) else 0.0
+    )
+    return {
+        "ticker": symbol,
+        "currency": "INR",
+        "latest_close": round(float(latest["Close"]), 2),
+        "previous_close": round(float(previous["Close"]), 2),
+        "price_change_pct": round(price_change, 2),
+        "latest_volume": latest_volume,
+        "average_volume_20d": int(avg_vol),
+        "volume_multiple": round(volume_multiple, 2) if volume_multiple is not None else None,
+        "as_of": hist.index[-1].isoformat(),
+        "history": [
+            {
+                "date": idx.strftime("%Y-%m-%d"),
+                "close": round(float(row["Close"]), 2),
+                "volume": int(row["Volume"]),
+            }
+            for idx, row in hist.tail(30).iterrows()
+        ],
+        "source": "Yahoo Finance via yfinance",
+        "provider_note": "Unofficial upstream data; may be delayed or rate-limited.",
+    }
+
+
+@app.get("/api/market/{ticker}")
+def market_data(ticker: str):
+    symbol = _ticker(ticker)
+    now = time.monotonic()
+
+    with MARKET_LOCK:
+        cached = MARKET_CACHE.get(symbol)
+        if cached and now - cached["fetched_at"] < MARKET_CACHE_TTL_SECONDS:
+            return {**cached["data"], "cache_status": "fresh_cache"}
+
+        if now < MARKET_FAILURE_UNTIL.get(symbol, 0):
+            if cached:
+                return {
+                    **cached["data"],
+                    "cache_status": "stale_cache",
+                    "warning": "Provider temporarily unavailable; serving last successful data.",
+                }
+            raise HTTPException(
+                503,
+                "Market data provider is temporarily rate-limited. Retry later.",
+            )
+
+    try:
+        result = _fetch_market_data(symbol)
+        with MARKET_LOCK:
+            MARKET_CACHE[symbol] = {"fetched_at": time.monotonic(), "data": result}
+            MARKET_FAILURE_UNTIL.pop(symbol, None)
+        return {**result, "cache_status": "live_fetch"}
+    except Exception as exc:
+        message = str(exc)
+        rate_limited = any(
+            marker in message.lower()
+            for marker in ("too many requests", "rate limit", "429")
+        )
+        with MARKET_LOCK:
+            MARKET_FAILURE_UNTIL[symbol] = time.monotonic() + MARKET_FAILURE_TTL_SECONDS
+            cached = MARKET_CACHE.get(symbol)
+        if cached:
+            return {
+                **cached["data"],
+                "cache_status": "stale_cache",
+                "warning": message[:180],
+            }
+        status = 503 if rate_limited else 502
+        detail = (
+            "Market data provider is rate-limited. Please retry later."
+            if rate_limited else f"Market data provider error: {message[:180]}"
+        )
+        raise HTTPException(status, detail)
+
+
+@app.post("/api/alerts/evaluate")
+def evaluate_alert(config: AlertConfig):
+    symbol = _ticker(config.ticker)
+    manual_mode = (
+        config.observed_price_change_pct is not None
+        or config.observed_volume_multiple is not None
+    )
+
+    if manual_mode:
+        # Explicit test/simulation mode. No external provider call is made.
+        price_change = config.observed_price_change_pct
+        volume_multiple = config.observed_volume_multiple
+        data = {
+            "source": "caller_supplied_test_observations",
+            "price_change_pct": price_change,
+            "volume_multiple": volume_multiple,
+            "is_simulated": True,
+        }
+    else:
+        data = market_data(symbol)
+        price_change = data["price_change_pct"]
+        volume_multiple = data["volume_multiple"]
+
+    reasons = []
+    if price_change is not None and abs(price_change) >= config.price_change_pct:
+        reasons.append(
+            f"Daily price move {price_change}% crossed ±{config.price_change_pct}% threshold"
+        )
+    if volume_multiple is not None and volume_multiple >= config.volume_multiple:
+        reasons.append(
+            f"Volume is {volume_multiple}x the recent average "
+            f"(threshold {config.volume_multiple}x)"
+        )
+
+    return {
+        "ticker": symbol,
+        "triggered": bool(reasons),
+        "reasons": reasons,
+        "evaluation_mode": "test_observations" if manual_mode else "provider_data",
+        "market_data": data,
+    }
+
+
+@app.get("/api/announcements")
+def announcements(demo: bool = True):
+    return {
+        "items": DEMO_ANNOUNCEMENTS if demo else [],
+        "mode": "demo_examples" if demo else "no_live_feed_configured",
+        "note": "Demo examples are not real corporate filings. No live NSE/BSE feed is configured.",
+    }
+
+
+@app.post("/api/documents/upload")
+async def upload_document(file: UploadFile = File(...), ticker: str = ""):
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(
+            400, "Upload a PDF annual report, results filing, or earnings-call transcript."
+        )
+    content = await file.read()
+    if len(content) > 25 * 1024 * 1024:
+        raise HTTPException(413, "PDF must be 25 MB or smaller")
+
+    safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", Path(file.filename).name)
+    path = DOC_DIR / f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{safe_name}"
+    path.write_bytes(content)
+    try:
+        pdf = fitz.open(path)
+        chunks = []
+        for page_no, page in enumerate(pdf, start=1):
+            page_text = page.get_text("text").strip()
+            words = page_text.split()
+            for start in range(0, len(words), 450):
+                excerpt = " ".join(words[start:start + 450])
+                if excerpt:
+                    chunks.append({
+                        "text": excerpt,
+                        "page": page_no,
+                        "filename": file.filename,
+                        "ticker": ticker.upper().strip(),
+                    })
+        if not chunks:
+            raise HTTPException(
+                422,
+                "No selectable text found. This PDF may be scanned; OCR is not enabled.",
+            )
+        DOCUMENTS.extend(chunks)
+        return {
+            "filename": file.filename,
+            "ticker": ticker.upper().strip(),
+            "pages": len(pdf),
+            "chunks_added": len(chunks),
+            "message": "Document indexed for this backend session.",
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(422, f"Could not parse PDF: {str(exc)[:160]}")
+
+
+@app.get("/api/documents")
+def list_documents():
+    grouped: dict[tuple[str, str], int] = {}
+    for document in DOCUMENTS:
+        key = (document["filename"], document["ticker"])
+        grouped[key] = grouped.get(key, 0) + 1
+    return {
+        "documents": [
+            {"filename": key[0], "ticker": key[1], "chunks": count}
+            for key, count in grouped.items()
+        ],
+        "chunk_count": len(DOCUMENTS),
+    }
+
+
+def retrieve(question: str, ticker: str, limit: int = 5):
+    terms = {word.lower() for word in re.findall(r"[A-Za-z0-9]{3,}", question)}
+    scored = []
+    for document in DOCUMENTS:
+        if document["ticker"] and document["ticker"] != ticker.upper():
+            continue
+        words = {
+            word.lower()
+            for word in re.findall(r"[A-Za-z0-9]{3,}", document["text"])
+        }
+        score = len(terms & words)
+        if score:
+            scored.append((score, document))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return [document for _, document in scored[:limit]]
+
+
+@app.post("/api/research")
+async def research(req: ResearchRequest):
+    ticker = _ticker(req.ticker)
+    sources = retrieve(req.question, ticker)
+    if not sources:
+        return {
+            "ticker": ticker,
+            "answer": (
+                "I don't have relevant primary-source passages for this question yet. "
+                "Upload the company's annual report, quarterly results or earnings-call "
+                "transcript first. I won't fill the gap using general model knowledge."
+            ),
+            "sources": [],
+            "grounded": False,
+            "status": "needs_documents",
+        }
+
+    context = "\n\n".join(
+        f"[Source: {source['filename']}, page {source['page']}]\n{source['text']}"
+        for source in sources
+    )
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return {
+            "ticker": ticker,
+            "answer": (
+                "Relevant source excerpts were retrieved. Add GEMINI_API_KEY to generate "
+                "a synthesized answer. No unsupported conclusion has been generated."
+            ),
+            "sources": [
+                {
+                    "document": source["filename"],
+                    "page": source["page"],
+                    "excerpt": source["text"][:900],
+                }
+                for source in sources
+            ],
+            "grounded": True,
+            "status": "retrieved_only",
+        }
+
+    model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+    prompt = (
+        "You are FINN, an investment research assistant. Answer only from the primary-source "
+        "excerpts below. Do not use outside knowledge or invent figures. If excerpts do not "
+        "support an answer, say so. Distinguish management claims from reported facts. Cite "
+        "every material claim using [filename, page N]. Do not give personalized buy/sell advice.\n\n"
+        f"QUESTION: {req.question}\n\nPRIMARY SOURCES:\n{context}"
+    )
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{model}:generateContent?key={api_key}"
+    )
+    async with httpx.AsyncClient(timeout=45) as client:
+        response = await client.post(
+            url,
+            json={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1200},
+            },
+        )
+    if response.status_code >= 400:
+        raise HTTPException(502, f"LLM provider error: {response.text[:250]}")
+    body = response.json()
+    answer = (
+        body.get("candidates", [{}])[0]
+        .get("content", {})
+        .get("parts", [{}])[0]
+        .get("text", "No answer returned")
+    )
+    return {
+        "ticker": ticker,
+        "answer": answer,
+        "sources": [
+            {
+                "document": source["filename"],
+                "page": source["page"],
+                "excerpt": source["text"][:500],
+            }
+            for source in sources
+        ],
+        "grounded": True,
+        "status": "answered",
+    }
