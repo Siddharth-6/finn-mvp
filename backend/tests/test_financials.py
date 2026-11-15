@@ -1,6 +1,6 @@
 import pytest
 
-from app.financials import parse_model_json, validate_results_payload
+from app.financials import parse_model_json, rank_financial_chunks, validate_results_payload
 
 
 def test_results_extraction_calculates_qoq_and_yoy_from_source_values():
@@ -67,3 +67,13 @@ def test_model_json_parser_accepts_fenced_json():
 def test_model_json_parser_rejects_invalid_json():
     with pytest.raises(ValueError):
         parse_model_json("not json")
+
+
+def test_financial_chunk_ranker_prioritizes_statement_pages():
+    sources = [
+        {"filename": "annual.pdf", "page": 1, "text": "Company overview and management letter."},
+        {"filename": "annual.pdf", "page": 42, "text": "Consolidated statement: Revenue from operations EBITDA Profit before tax Profit after tax for quarter ended."},
+        {"filename": "annual.pdf", "page": 3, "text": "Board members and registered office."},
+    ]
+    ranked = rank_financial_chunks(sources, limit=2)
+    assert [item["page"] for item in ranked] == [42, 1]
