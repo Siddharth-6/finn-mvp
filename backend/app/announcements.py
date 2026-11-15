@@ -33,7 +33,7 @@ CATEGORY_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("M&A", ("acquisition", "merger", "amalgamation", "demerger", "joint venture", "subsidiary", "stake sale")),
     ("fund_raise", ("qip", "qualified institutions placement", "preferential issue", "rights issue", "commercial paper", "fund raising", "buyback", "buy-back", "debenture")),
     ("management_change", ("change in management", "resignation", "appointment of", "cessation", "chief executive", "chief financial officer", "managing director", "independent director")),
-    ("litigation", ("litigation", "court", "tribunal", "penalty", "fine", "show cause", "insolvency", "regulatory order", " sebi ")),
+    ("litigation", ("litigation", "lawsuit", "court order", "tribunal", "penalty", "show cause", "insolvency", "regulatory order")),
     ("insider_trading", ("insider trading", "trading by designated person", "disclosure under regulation 7", "trading window")),
     ("earnings_call", ("conference call", "earnings call", "analyst call", "investor call", "transcript of", "audio recording")),
     ("investor_meetings", ("investor meet", "investor meeting", "analyst meet", "investor conference")),
@@ -66,12 +66,24 @@ def _safe_attachment(value: str | None) -> str | None:
     url = value.strip()
     if url.startswith("//"):
         url = "https:" + url
+    # Screener often rewrites AnnPdfOpen.aspx?Pname=... to AttachHis/<uuid>.pdf
+    if "bseindia.com/stockinfo/AnnPdfOpen.aspx" in url and "Pname=" in url:
+        pname = url.split("Pname=", 1)[1].split("&", 1)[0]
+        pname = pname.split("?", 1)[0]
+        if pname.lower().endswith(".pdf"):
+            stem = pname[:-4]
+            if re.fullmatch(r"[0-9a-fA-F-]{30,}", stem):
+                url = f"https://www.bseindia.com/xml-data/corpfiling/AttachHis/{pname}"
     parsed = urlparse(url)
-    if parsed.scheme != "https" or not (
-        parsed.hostname == "nsearchives.nseindia.com"
-        or parsed.hostname == "www.nseindia.com"
-        or parsed.hostname == "nseindia.com"
-    ):
+    host = (parsed.hostname or "").lower()
+    allowed = {
+        "nsearchives.nseindia.com",
+        "www.nseindia.com",
+        "nseindia.com",
+        "www.bseindia.com",
+        "bseindia.com",
+    }
+    if parsed.scheme != "https" or host not in allowed:
         return None
     return url
 
@@ -219,6 +231,97 @@ def _fetch_nse_rss(symbols: set[str]) -> list[dict[str, Any]]:
     return items
 
 
+
+def _parse_screener_datetime(raw: str) -> datetime | None:
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    try:
+        # Screener serves +05:30 timestamps.
+        return datetime.fromisoformat(raw).astimezone(IST)
+    except ValueError:
+        return None
+
+
+def _fetch_screener_company(symbol: str) -> list[dict[str, Any]]:
+    """BSE filings as indexed on screener.in — used when NSE blocks cloud IPs."""
+    url = f"https://www.screener.in/company/{symbol}/consolidated/"
+    with httpx.Client(
+        headers={"User-Agent": USER_AGENT, "Accept": "text/html"},
+        timeout=20.0,
+        follow_redirects=True,
+    ) as client:
+        response = client.get(url)
+        if response.status_code == 404:
+            response = client.get(f"https://www.screener.in/company/{symbol}/")
+        response.raise_for_status()
+        html = response.text
+
+    items: list[dict[str, Any]] = []
+    # Keep parsing dependency-free: match announcement list entries.
+    pattern = re.compile(
+        r'<li[^>]*>\s*<a[^>]+href="(?P<href>[^"]+)"[^>]*>\s*(?P<title>.*?)\s*'
+        r'<div[^>]*>\s*<time[^>]+datetime="(?P<dt>[^"]+)"[^>]*>.*?</time>\s*'
+        r'(?:-\s*)?(?P<summary>.*?)</div>',
+        re.I | re.S,
+    )
+    # Restrict to the announcements tab block when present.
+    block = html
+    marker = 'id="company-announcements-tab"'
+    if marker in html:
+        start = html.index(marker)
+        block = html[start:start + 12000]
+
+    for match in pattern.finditer(block):
+        title = re.sub(r"<[^>]+>", "", match.group("title")).strip()
+        title = re.sub(r"\s+", " ", title)
+        summary = re.sub(r"<[^>]+>", "", match.group("summary")).strip()
+        summary = re.sub(r"\s+", " ", summary)
+        if not title:
+            continue
+        published = _parse_screener_datetime(match.group("dt"))
+        href = match.group("href").replace("&amp;", "&")
+        category, priority = classify_announcement(f"{title} {summary}")
+        attachment = _safe_attachment(href)
+        identity = f"{symbol}|{title}|{match.group('dt')}|{href}"
+        items.append({
+            "id": hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20],
+            "exchange": "BSE" if attachment and "bseindia.com" in attachment else "NSE/BSE",
+            "ticker": symbol,
+            "company": symbol,
+            "category": category,
+            "exchange_category": "Screener index",
+            "title": title,
+            "summary": summary or title,
+            "priority": priority,
+            "published_at": published.isoformat() if published else None,
+            "source_url": attachment or href,
+            "source_page": f"https://www.screener.in/company/{symbol}/",
+            "source_name": "Exchange filings via screener.in",
+            "is_demo": False,
+            "classification_method": "keyword_rules_v1",
+        })
+    return items
+
+
+def _fetch_screener_portfolio(symbols: set[str]) -> list[dict[str, Any]]:
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    out: list[dict[str, Any]] = []
+    errors: list[str] = []
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futures = {pool.submit(_fetch_screener_company, sym): sym for sym in sorted(symbols)}
+        for fut in as_completed(futures):
+            sym = futures[fut]
+            try:
+                out.extend(fut.result())
+            except Exception as exc:
+                errors.append(f"{sym}: {type(exc).__name__}: {str(exc)[:100]}")
+    # Stash last screener errors on the function for the caller to read.
+    _fetch_screener_portfolio.last_errors = errors  # type: ignore[attr-defined]
+    return out
+
+
 def fetch_portfolio_announcements(
     tickers: list[str],
     hours: int = 24,
@@ -231,6 +334,7 @@ def fetch_portfolio_announcements(
     errors: list[str] = []
     source = "NSE corporate announcements JSON"
 
+    items: list[dict[str, Any]] = []
     try:
         items = _fetch_nse_json(start, end, symbols)
     except Exception as exc:
@@ -240,36 +344,70 @@ def fetch_portfolio_announcements(
             items = _fetch_nse_rss(symbols)
         except Exception as rss_exc:
             errors.append(f"NSE RSS: {type(rss_exc).__name__}: {str(rss_exc)[:180]}")
-            return {
-                "items": [],
-                "mode": "source_unavailable",
-                "source": None,
-                "window_hours": hours,
-                "fetched_at": end.isoformat(),
-                "portfolio_symbols": sorted(symbols),
-                "errors": errors,
-                "note": "Live NSE sources could not be reached. No demo items are substituted.",
-            }
+            items = []
 
-    filtered = []
-    for item in items:
-        # Enforce portfolio membership again after source normalization so
-        # fallback feeds and mocked/test adapters cannot leak other issuers.
-        if str(item.get("ticker") or "").upper() not in symbols:
-            continue
-        timestamp = item.get("published_at")
-        if timestamp:
-            try:
-                parsed = datetime.fromisoformat(timestamp)
-                if parsed < start or parsed > end + timedelta(minutes=5):
-                    continue
-            except ValueError:
+    def _filter(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        kept = []
+        for item in rows:
+            # Enforce portfolio membership again after source normalization so
+            # fallback feeds and mocked/test adapters cannot leak other issuers.
+            if str(item.get("ticker") or "").upper() not in symbols:
                 continue
-        else:
-            continue
-        if not include_routine and item["priority"] == "low":
-            continue
-        filtered.append(item)
+            timestamp = item.get("published_at")
+            if timestamp:
+                try:
+                    parsed = datetime.fromisoformat(timestamp)
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=IST)
+                    if parsed < start or parsed > end + timedelta(minutes=5):
+                        continue
+                except ValueError:
+                    continue
+            else:
+                continue
+            if not include_routine and item["priority"] == "low":
+                continue
+            kept.append(item)
+        return kept
+
+    filtered = _filter(items)
+
+    # Cloud hosts are often blocked by NSE (403). Screener indexes the same
+    # exchange filings and remains reachable — use it so Push stays usable.
+    if not filtered:
+        try:
+            screener_items = _fetch_screener_portfolio(symbols)
+            screener_errors = getattr(_fetch_screener_portfolio, "last_errors", [])
+            errors.extend(screener_errors)
+            filtered = _filter(screener_items)
+            if filtered:
+                source = "Exchange filings via screener.in"
+            elif not items and not screener_items:
+                return {
+                    "items": [],
+                    "mode": "source_unavailable",
+                    "source": None,
+                    "window_hours": hours,
+                    "fetched_at": end.isoformat(),
+                    "portfolio_symbols": sorted(symbols),
+                    "errors": errors,
+                    "note": "Live exchange sources could not be reached. No demo items are substituted.",
+                }
+        except Exception as screener_exc:
+            errors.append(
+                f"Screener: {type(screener_exc).__name__}: {str(screener_exc)[:180]}"
+            )
+            if not items:
+                return {
+                    "items": [],
+                    "mode": "source_unavailable",
+                    "source": None,
+                    "window_hours": hours,
+                    "fetched_at": end.isoformat(),
+                    "portfolio_symbols": sorted(symbols),
+                    "errors": errors,
+                    "note": "Live exchange sources could not be reached. No demo items are substituted.",
+                }
 
     # Deduplicate by stable filing ID and sort newest/highest priority first.
     unique = {item["id"]: item for item in filtered}
