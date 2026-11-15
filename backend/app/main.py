@@ -139,7 +139,7 @@ def get_portfolio():
 
 def _fetch_market_data(symbol: str, average_days: int = 20) -> dict[str, Any]:
     hist = yf.Ticker(symbol).history(
-        period="3mo", interval="1d", auto_adjust=False
+        period="1y", interval="1d", auto_adjust=False
     )
     if hist.empty:
         raise ValueError(f"No market data returned for {symbol}")
