@@ -6,6 +6,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import Any
 
 import pymupdf
@@ -16,7 +17,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from app.announcements import fetch_portfolio_announcements
+from app.announcements import _safe_attachment, fetch_portfolio_announcements
 from app.financials import build_results_prompt, parse_model_json, validate_results_payload
 
 load_dotenv()
@@ -89,6 +90,11 @@ class ResearchRequest(BaseModel):
 
 class ResultsAnalysisRequest(BaseModel):
     ticker: str = Field(min_length=1, max_length=30)
+
+
+class ResultsFilingRequest(BaseModel):
+    ticker: str = Field(min_length=1, max_length=30)
+    source_url: str = Field(min_length=10, max_length=2048)
 
 
 class AlertConfig(BaseModel):
@@ -459,6 +465,65 @@ async def analyze_quarterly_results(req: ResultsAnalysisRequest):
     except (KeyError, IndexError, TypeError, ValueError) as exc:
         raise HTTPException(502, f"Could not validate financial extraction: {str(exc)[:180]}")
     result["status"] = "extracted"
+    return result
+
+
+@app.post("/api/results/analyze-filing")
+async def analyze_results_filing(req: ResultsFilingRequest):
+    """Fetch an NSE-hosted results PDF from a filing card, index it, then analyze it."""
+    ticker = _ticker(req.ticker)
+    safe_url = _safe_attachment(req.source_url)
+    if not safe_url:
+        raise HTTPException(400, "Only verified NSE-hosted filing URLs can be analyzed.")
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=40,
+            follow_redirects=True,
+            headers={"User-Agent": "FINN research prototype/1.0"},
+        ) as client:
+            response = await client.get(safe_url)
+        response.raise_for_status()
+        content = response.content
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, f"Could not retrieve the NSE filing: {str(exc)[:160]}")
+    if len(content) > 25 * 1024 * 1024:
+        raise HTTPException(413, "Filing PDF exceeds the 25 MB processing limit.")
+    if not content.startswith(b"%PDF"):
+        raise HTTPException(422, "The NSE attachment did not return a PDF document.")
+
+    try:
+        pdf = pymupdf.open(stream=content, filetype="pdf")
+        filename = f"NSE_{ticker}_{datetime.now().strftime('%Y%m%d%H%M%S')}.pdf"
+        stored_path = DOC_DIR / filename
+        stored_path.write_bytes(content)
+        chunks = []
+        for page_no, page in enumerate(pdf, start=1):
+            words = page.get_text("text").strip().split()
+            for start in range(0, len(words), 450):
+                excerpt = " ".join(words[start:start + 450])
+                if excerpt:
+                    chunks.append({
+                        "text": excerpt,
+                        "page": page_no,
+                        "filename": filename,
+                        "ticker": ticker,
+                    })
+        if not chunks:
+            raise HTTPException(422, "The filing has no selectable text; scanned-PDF OCR is not enabled.")
+        DOCUMENTS.extend(chunks)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(422, f"Could not parse the NSE filing: {str(exc)[:160]}")
+
+    result = await analyze_quarterly_results(ResultsAnalysisRequest(ticker=ticker))
+    result["filing"] = {
+        "filename": filename,
+        "source_url": safe_url,
+        "pages": len(pdf),
+        "chunks_added": len(chunks),
+    }
     return result
 
 
