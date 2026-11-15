@@ -47,7 +47,7 @@ def test_results_extraction_discards_observations_from_uncited_pages():
 
 
 def test_results_extraction_handles_zero_comparison_without_division():
-    sources = [{"filename": "results.pdf", "page": 1, "text": "PAT 10"}]
+    sources = [{"filename": "results.pdf", "page": 1, "text": "PAT 10 PAT 0"}]
     payload = {
         "metrics": {
             "pat": {
