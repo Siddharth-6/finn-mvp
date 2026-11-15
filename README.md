@@ -42,3 +42,34 @@ Open http://localhost:3000. API docs: http://localhost:8000/docs.
 3. Implement verified corporate-announcement ingestion with source URLs, timestamps and deduplication.
 4. Persist uploaded documents and retrieval indexes.
 5. Add automated tests and deployment configuration.
+
+## Corporate announcement digest
+
+The live digest is exposed at `GET /api/announcements`.
+
+- `hours`: look-back window from 1 to 720 hours (default 24).
+- `include_routine`: include low-priority/unclassified filings (default true).
+- `demo=true`: explicitly request clearly labelled illustrative cards. Demo cards are never substituted into live mode.
+- Live mode currently queries NSE's public corporate-announcements JSON endpoint and falls back to NSE's public RSS feed if the JSON source is unavailable.
+- Results are restricted to the configured NSE portfolio, normalized, deduplicated, timestamp-filtered and sorted by FINN priority then recency.
+- Each live item carries the exchange, source name, source page, and a validated NSE attachment URL when supplied.
+- The first-pass category/priority classifier uses transparent keyword rules aligned to the ENAM companion reference. It is not an exchange label or an investment recommendation.
+- The upstream endpoints are public website interfaces, not a guaranteed/licensed API. If both sources are unavailable, the API returns an empty result with `mode=source_unavailable`; it does not fabricate filings.
+
+Example:
+
+```text
+GET http://localhost:8000/api/announcements?hours=24&include_routine=true
+```
+
+## Tests and CI
+
+Run backend tests:
+
+```powershell
+cd backend
+pip install -r requirements.txt
+pytest -q
+```
+
+GitHub Actions runs backend tests and a frontend production build on pushes and pull requests to `main`.
