@@ -86,11 +86,12 @@ def _valid_observation(value: Any, page_texts: dict[int, str]) -> dict[str, Any]
     # cited uploaded page. This rejects unsupported model-generated values.
     digits = re.sub(r"\D", "", f"{number:g}")
     evidence_digits = re.sub(r"\D", "", evidence)
-    if not digits or digits not in evidence_digits:
+    source_digits = re.sub(r"\D", "", page_texts[page])
+    if not digits or digits not in evidence_digits or digits not in source_digits:
         return None
     evidence_words = set(re.findall(r"[a-z0-9]+", evidence.lower()))
     source_words = set(re.findall(r"[a-z0-9]+", page_texts[page].lower()))
-    if len(evidence_words) < 2 or len(evidence_words & source_words) / len(evidence_words) < 0.5:
+    if len(evidence_words) < 2 or len(evidence_words & source_words) / len(evidence_words) < 0.7:
         return None
     return {"value": float(number), "page": page, "evidence": evidence.strip()[:500]}
 
