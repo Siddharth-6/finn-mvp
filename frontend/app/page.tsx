@@ -52,7 +52,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (tab === 'Overview' || tab === 'Alerts') loadMarket('RELIANCE.NS');
+    if (tab === 'Overview') loadMarket('RELIANCE.NS');
   }, [tab]);
 
   async function loadAnnouncements(hours = announcementHours, routine = includeRoutine) {
