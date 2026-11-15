@@ -7,6 +7,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import pymupdf
 import httpx
@@ -338,7 +339,7 @@ async def discover_company_sources(ticker: str):
     if cached and now - cached["cached_at"] < SOURCE_CACHE_TTL_SECONDS:
         return {**cached["payload"], "cache_status": "fresh_cache"}
 
-    slug = re.sub(r"\\.(NS|BO)$", "", symbol, flags=re.IGNORECASE)
+    slug = re.sub(r"\.(NS|BO)$", "", symbol, flags=re.IGNORECASE)
     page_url = f"https://www.screener.in/company/{quote(slug, safe='&-')}/"
     try:
         async with httpx.AsyncClient(
