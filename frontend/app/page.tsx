@@ -10,12 +10,12 @@ function getApiBase() {
   const configured = process.env.NEXT_PUBLIC_API_URL?.trim();
   // 0.0.0.0 is a bind address, not a browser-reachable API hostname.
   if (configured && !configured.includes('0.0.0.0')) {
-    return configured.replace(/\\/$/, '');
+    return configured.replace(/\/+$/, '');
   }
   if (typeof window !== 'undefined') {
     // Codespaces exposes each forwarded port on a matching *.app.github.dev host.
     return window.location.origin.replace(
-      /-3000\\.app\\.github\\.dev$/,
+      /-3000\.app\.github\.dev$/,
       '-8000.app.github.dev'
     );
   }
