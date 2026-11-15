@@ -24,20 +24,20 @@ provided excerpts. Do not calculate or infer missing source values. Preserve the
 reported (for example INR crore, INR million, or INR lakh). Do not mix standalone and consolidated
 figures; prefer consolidated if clearly labelled, otherwise use the clearly identified statement
 basis and state it in basis. If the basis is ambiguous, set basis to "unclear".
-Each non-null figure must include the source page number and a short verbatim evidence excerpt
-that contains or directly labels the number. Use JSON null for unavailable values.
+Each non-null figure must be an object with numeric value, source page number, and a short
+verbatim evidence excerpt containing the number. Use JSON null for unavailable values.
 Return ONLY valid JSON with this schema:
 {{
   "company": "{ticker}",
-  "basis": "consolidated | standalone | unclear",
-  "unit": "unit as printed, or null",
+  "basis": "consolidated",
+  "unit": "INR crore",
   "periods": {{
-    "current_quarter": "period label or null",
-    "previous_quarter": "period label or null",
-    "year_ago_quarter": "period label or null"
+    "current_quarter": "Q2 FY27",
+    "previous_quarter": "Q1 FY27",
+    "year_ago_quarter": "Q2 FY26"
   }},
   "metrics": {{
-    "revenue": {{"current_quarter": {{"value": 0, "page": 1, "evidence": "..."}} or null, "previous_quarter": null, "year_ago_quarter": null}},
+    "revenue": {{"current_quarter": null, "previous_quarter": null, "year_ago_quarter": null}},
     "ebitda": {{"current_quarter": null, "previous_quarter": null, "year_ago_quarter": null}},
     "pbt": {{"current_quarter": null, "previous_quarter": null, "year_ago_quarter": null}},
     "pat": {{"current_quarter": null, "previous_quarter": null, "year_ago_quarter": null}}
@@ -49,7 +49,7 @@ Source excerpts:
 """
 
 
-def _valid_observation(value: Any, allowed_pages: set[int]) -> dict[str, Any] | None:
+def _valid_observation(value: Any, page_texts: dict[int, str]) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
     number = value.get("value")
@@ -57,9 +57,20 @@ def _valid_observation(value: Any, allowed_pages: set[int]) -> dict[str, Any] | 
     evidence = value.get("evidence")
     if isinstance(number, bool) or not isinstance(number, (int, float)):
         return None
-    if not isinstance(page, int) or page not in allowed_pages:
+    if not isinstance(page, int) or page not in page_texts:
         return None
     if not isinstance(evidence, str) or len(evidence.strip()) < 5:
+        return None
+
+    # Require the reported number and most evidence words to occur on the
+    # cited uploaded page. This rejects unsupported model-generated values.
+    digits = re.sub(r"\\D", "", f"{number:g}")
+    evidence_digits = re.sub(r"\\D", "", evidence)
+    if not digits or digits not in evidence_digits:
+        return None
+    evidence_words = set(re.findall(r"[a-z0-9]+", evidence.lower()))
+    source_words = set(re.findall(r"[a-z0-9]+", page_texts[page].lower()))
+    if len(evidence_words) < 2 or len(evidence_words & source_words) / len(evidence_words) < 0.5:
         return None
     return {"value": float(number), "page": page, "evidence": evidence.strip()[:500]}
 
@@ -73,7 +84,10 @@ def _pct_change(current: dict[str, Any] | None, comparison: dict[str, Any] | Non
 def validate_results_payload(payload: Any, ticker: str, sources: list[dict[str, Any]]) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("The extraction response was not a JSON object.")
-    allowed_pages = {int(source["page"]) for source in sources}
+    page_texts: dict[int, str] = {}
+    for source in sources:
+        page = int(source["page"])
+        page_texts[page] = page_texts.get(page, "") + " " + source["text"]
     raw_metrics = payload.get("metrics")
     if not isinstance(raw_metrics, dict):
         raise ValueError("The extraction response did not contain a metrics object.")
@@ -83,7 +97,7 @@ def validate_results_payload(payload: Any, ticker: str, sources: list[dict[str, 
         raw = raw_metrics.get(metric, {})
         raw = raw if isinstance(raw, dict) else {}
         observations = {
-            period: _valid_observation(raw.get(period), allowed_pages)
+            period: _valid_observation(raw.get(period), page_texts)
             for period in PERIODS
         }
         metrics[metric] = {
