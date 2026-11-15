@@ -10,13 +10,18 @@ const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 type Company = { ticker: string; name: string; sector: string };
 type Announcement = {
   id: string; ticker: string; company: string; category: string; title: string;
-  summary: string; priority: string; published_at: string; is_demo: boolean;
+  summary: string; priority: string; published_at: string | null; is_demo: boolean;
+  source_url?: string | null; source_name?: string; exchange?: string;
 };
 
 export default function Home() {
   const [tab, setTab] = useState('Overview');
   const [portfolio, setPortfolio] = useState<Company[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [announcementMode, setAnnouncementMode] = useState('Loading');
+  const [announcementNote, setAnnouncementNote] = useState('');
+  const [announcementHours, setAnnouncementHours] = useState('24');
+  const [includeRoutine, setIncludeRoutine] = useState(true);
   const [apiStatus, setApiStatus] = useState('Connecting');
   const [ticker, setTicker] = useState('TCS.NS');
   const [question, setQuestion] = useState('What does management say about growth outlook and key risks?');
@@ -34,12 +39,30 @@ export default function Home() {
   useEffect(() => {
     fetch(`${API}/health`).then(r => r.ok ? setApiStatus('Connected') : setApiStatus('Unavailable')).catch(() => setApiStatus('Offline'));
     fetch(`${API}/api/portfolio`).then(r => r.json()).then(d => setPortfolio(d.items || [])).catch(() => {});
-    fetch(`${API}/api/announcements`).then(r => r.json()).then(d => setAnnouncements(d.items || [])).catch(() => {});
+    loadAnnouncements('24', true);
   }, []);
 
   useEffect(() => {
     if (tab === 'Overview' || tab === 'Alerts') loadMarket('RELIANCE.NS');
   }, [tab]);
+
+  async function loadAnnouncements(hours = announcementHours, routine = includeRoutine) {
+    setAnnouncementMode('Loading');
+    setAnnouncementNote('');
+    try {
+      const params = new URLSearchParams({ hours, include_routine: String(routine) });
+      const response = await fetch(`${API}/api/announcements?${params.toString()}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Announcement feed unavailable');
+      setAnnouncements(data.items || []);
+      setAnnouncementMode(data.mode || 'unknown');
+      setAnnouncementNote(data.note || '');
+    } catch (error: any) {
+      setAnnouncements([]);
+      setAnnouncementMode('source_unavailable');
+      setAnnouncementNote(error.message || 'Could not load corporate announcements.');
+    }
+  }
 
   async function loadMarket(symbol: string) {
     setMarketError('');
@@ -148,7 +171,32 @@ export default function Home() {
             <div className="panel p-5 sm:p-6 xl:col-span-2"><div className="mb-4 flex items-center justify-between"><h2 className="font-semibold">Watchlist</h2><span className="text-xs text-slate-500">Configured companies</span></div><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{portfolio.map(c => <div key={c.ticker} className="rounded-lg border border-slate-800 bg-slate-950/30 p-3"><div className="text-sm font-semibold">{c.name}</div><div className="mt-1 text-xs text-slate-500">{c.ticker} · {c.sector}</div></div>)}</div></div>
           </div>}
 
-          {tab === 'Smart Digest' && <div className="panel p-5 sm:p-6"><div className="mb-4 flex items-center justify-between"><div><h2 className="font-semibold">Portfolio announcement digest</h2><p className="mt-1 text-xs text-slate-500">Prioritized company disclosures</p></div><span className="pill">Demo mode</span></div><div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-200">These sample cards are illustrative, not actual NSE/BSE filings. A verified live filing source is not configured.</div><div className="space-y-3">{announcements.map(a => <article key={a.id} className="rounded-xl border border-slate-800 p-4"><div className="flex items-center justify-between gap-3"><div className="font-semibold">{a.company} <span className="ml-1 text-xs font-normal text-slate-500">{a.ticker}</span></div><span className="pill">{a.priority} priority</span></div><h3 className="mt-3 text-sm">{a.title}</h3><p className="mt-2 text-xs leading-5 text-slate-400">{a.summary}</p><div className="mt-3 text-[10px] text-slate-600">{a.category} · {a.published_at} · demo</div></article>)}</div></div>}
+          {tab === 'Smart Digest' && <div className="panel p-5 sm:p-6">
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+              <div><h2 className="font-semibold">Portfolio announcement digest</h2><p className="mt-1 text-xs text-slate-500">NSE corporate filings · newest material items first</p></div>
+              <span className="pill">{announcementMode === 'live' ? 'Live NSE source' : announcementMode.replaceAll('_', ' ')}</span>
+            </div>
+            <div className="mb-5 grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+              <label className="text-xs text-slate-400">Time window
+                <select className="field mt-2" value={announcementHours} onChange={e => { setAnnouncementHours(e.target.value); loadAnnouncements(e.target.value, includeRoutine); }}>
+                  <option value="24">Last 24 hours</option><option value="48">Last 48 hours</option><option value="72">Last 3 days</option><option value="168">Last 7 days</option><option value="336">Last 14 days</option><option value="720">Last 30 days</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-2 pb-3 text-xs text-slate-400"><input type="checkbox" checked={includeRoutine} onChange={e => { setIncludeRoutine(e.target.checked); loadAnnouncements(announcementHours, e.target.checked); }}/> Include routine / low-priority filings</label>
+              <button onClick={() => loadAnnouncements()} className="btn btn-ghost">Refresh feed</button>
+            </div>
+            {announcementMode === 'source_unavailable' && <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-200">Live NSE source is currently unavailable. FINN will not replace missing live filings with demo announcements. {announcementNote}</div>}
+            {announcementMode === 'live' && <div className="mb-4 rounded-lg border border-lime-500/20 bg-lime-500/5 p-3 text-xs text-lime-200">Fetched from {announcements[0]?.source_name || 'NSE corporate filings'}. FINN's category and priority are first-pass keyword classifications, not exchange-assigned labels.</div>}
+            {announcementMode === 'demo_examples' && <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-200">Illustrative examples only — not real company disclosures.</div>}
+            {announcementNote && announcementMode !== 'source_unavailable' && <p className="mb-3 text-xs text-slate-500">{announcementNote}</p>}
+            <div className="mb-4 flex flex-wrap gap-2 text-[10px] text-slate-500"><span className="pill">High: {announcements.filter(a => a.priority === 'high').length}</span><span className="pill">Medium: {announcements.filter(a => a.priority === 'medium').length}</span><span className="pill">Low: {announcements.filter(a => a.priority === 'low').length}</span><span className="ml-auto self-center">{announcements.length} filings in selected window</span></div>
+            {announcements.length === 0 && announcementMode !== 'source_unavailable' && <div className="rounded-xl border border-dashed border-slate-700 p-10 text-center"><div className="text-sm font-semibold text-slate-300">No matching filings found</div><p className="mt-2 text-xs text-slate-500">No portfolio announcements were returned for this time window and selected filters.</p></div>}
+            <div className="space-y-3">{announcements.map(a => <article key={a.id} className="rounded-xl border border-slate-800 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3"><div className="font-semibold">{a.company} <span className="ml-1 text-xs font-normal text-slate-500">{a.ticker}</span></div><span className="pill">{a.priority} priority</span></div>
+              <h3 className="mt-3 text-sm">{a.title}</h3><p className="mt-2 text-xs leading-5 text-slate-400">{a.summary}</p>
+              <div className="mt-3 flex flex-wrap items-center gap-3 text-[10px] text-slate-600"><span>{a.category}</span><span>{a.published_at ? new Date(a.published_at).toLocaleString() : 'Time unavailable'}</span><span>{a.exchange || 'NSE'}</span>{a.is_demo && <span className="text-amber-300">DEMO</span>}{a.source_url && <a className="text-lime-300 underline" href={a.source_url} target="_blank" rel="noreferrer">Open filing ↗</a>}</div>
+            </article>)}</div>
+          </div>}
 
           {tab === 'Company Research' && <div className="grid gap-5 lg:grid-cols-2">
             <div className="panel p-5 sm:p-6"><div className="mb-5 flex items-center gap-2"><Search className="text-lime-300"/><h2 className="font-semibold">Research a company</h2></div><label className="mb-2 block text-xs text-slate-400">NSE/BSE ticker</label><input className="field mb-4" value={ticker} onChange={e => setTicker(e.target.value.toUpperCase())}/><label className="mb-2 block text-xs text-slate-400">Research question</label><textarea className="field min-h-[120px]" value={question} onChange={e => setQuestion(e.target.value)}/><button disabled={busy} onClick={runResearch} className="btn btn-primary mt-4 w-full disabled:opacity-50">{busy ? 'Researching…' : 'Research from primary sources'} <Sparkles className="ml-1 inline" size={14}/></button><p className="mt-4 text-xs leading-5 text-slate-500">Upload primary-source documents first. FINN will not invent missing evidence.</p><button onClick={() => setTab('Documents')} className="btn btn-ghost mt-3 w-full"><UploadCloud className="mr-2 inline" size={14}/>Upload company documents</button></div>
