@@ -6,21 +6,12 @@ import {
   FileText, LayoutDashboard, Search, ShieldCheck, Sparkles, UploadCloud,
 } from 'lucide-react';
 
+// Browser requests stay on the frontend origin. Next.js proxies /api and
+// /health to FastAPI server-side, avoiding Codespaces private-port auth/CORS.
 function getApiBase() {
-  const configured = process.env.NEXT_PUBLIC_API_URL?.trim();
-  // 0.0.0.0 is a bind address, not a browser-reachable API hostname.
-  if (configured && !configured.includes('0.0.0.0')) {
-    return configured.replace(/\/+$/, '');
-  }
-  if (typeof window !== 'undefined') {
-    // Codespaces exposes each forwarded port on a matching *.app.github.dev host.
-    return window.location.origin.replace(
-      /-3000\.app\.github\.dev$/,
-      '-8000.app.github.dev'
-    );
-  }
-  return 'http://localhost:8000';
+  return '';
 }
+
 type Company = { ticker: string; name: string; sector: string };
 type Announcement = {
   id: string; ticker: string; company: string; category: string; title: string;
