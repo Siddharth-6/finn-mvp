@@ -25,6 +25,8 @@ export default function Home() {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [announcementMode, setAnnouncementMode] = useState('Loading');
   const [announcementNote, setAnnouncementNote] = useState('');
+  const [announcementSource, setAnnouncementSource] = useState('');
+  const [announcementErrors, setAnnouncementErrors] = useState<string[]>([]);
   const [announcementHours, setAnnouncementHours] = useState('24');
   const [includeRoutine, setIncludeRoutine] = useState(true);
   const [apiStatus, setApiStatus] = useState('Connecting');
@@ -60,6 +62,8 @@ export default function Home() {
   async function loadAnnouncements(hours = announcementHours, routine = includeRoutine) {
     setAnnouncementMode('Loading');
     setAnnouncementNote('');
+    setAnnouncementSource('');
+    setAnnouncementErrors([]);
     try {
       const params = new URLSearchParams({ hours, include_routine: String(routine) });
       const response = await fetch(`${getApiBase()}/api/announcements?${params.toString()}`);
@@ -68,6 +72,8 @@ export default function Home() {
       setAnnouncements(data.items || []);
       setAnnouncementMode(data.mode || 'unknown');
       setAnnouncementNote(data.note || '');
+      setAnnouncementSource(data.source || '');
+      setAnnouncementErrors(Array.isArray(data.errors) ? data.errors : []);
     } catch (error: any) {
       setAnnouncements([]);
       setAnnouncementMode('source_unavailable');
@@ -279,11 +285,11 @@ export default function Home() {
               <button onClick={() => loadAnnouncements()} className="btn btn-ghost">Refresh feed</button>
             </div>
             {announcementMode === 'source_unavailable' && <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-200">Live NSE source is currently unavailable. FINN will not replace missing live filings with demo announcements. {announcementNote}</div>}
-            {announcementMode === 'live' && <div className="mb-4 rounded-lg border border-lime-500/20 bg-lime-500/5 p-3 text-xs text-lime-200">Fetched from {announcements[0]?.source_name || 'NSE corporate filings'}. FINN's category and priority are first-pass keyword classifications, not exchange-assigned labels.</div>}
+            {announcementMode === 'live' && <div className="mb-4 rounded-lg border border-lime-500/20 bg-lime-500/5 p-3 text-xs text-lime-200">Source: {announcementSource || announcements[0]?.source_name || 'NSE corporate filings'}. {announcementErrors.length > 0 ? `Fallback used after source error: ${announcementErrors.join(' · ')}` : 'Live source request completed.'} FINN's category and priority are first-pass keyword classifications, not exchange-assigned labels.</div>}
             {announcementMode === 'demo_examples' && <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-200">Illustrative examples only — not real company disclosures.</div>}
             {announcementNote && announcementMode !== 'source_unavailable' && <p className="mb-3 text-xs text-slate-500">{announcementNote}</p>}
             <div className="mb-4 flex flex-wrap gap-2 text-[10px] text-slate-500"><span className="pill">High: {announcements.filter(a => a.priority === 'high').length}</span><span className="pill">Medium: {announcements.filter(a => a.priority === 'medium').length}</span><span className="pill">Low: {announcements.filter(a => a.priority === 'low').length}</span><span className="ml-auto self-center">{announcements.length} filings in selected window</span></div>
-            {announcements.length === 0 && announcementMode !== 'source_unavailable' && <div className="rounded-xl border border-dashed border-slate-700 p-10 text-center"><div className="text-sm font-semibold text-slate-300">No matching filings found</div><p className="mt-2 text-xs text-slate-500">No portfolio announcements were returned for this time window and selected filters.</p></div>}
+            {announcements.length === 0 && announcementMode !== 'source_unavailable' && <div className="rounded-xl border border-dashed border-slate-700 p-10 text-center"><div className="text-sm font-semibold text-slate-300">No matching filings found</div><p className="mt-2 text-xs text-slate-500">{announcementErrors.length > 0 ? 'The primary NSE feed failed and the fallback returned no matching portfolio filings. This is not confirmation that no disclosures exist.' : 'No portfolio announcements were returned for this time window and selected filters.'}</p></div>}
             <div className="space-y-3">{announcements.map(a => <article key={a.id} className="rounded-xl border border-slate-800 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3"><div className="font-semibold">{a.company} <span className="ml-1 text-xs font-normal text-slate-500">{a.ticker}</span></div><span className="pill">{a.priority} priority</span></div>
               <h3 className="mt-3 text-sm">{a.title}</h3><p className="mt-2 text-xs leading-5 text-slate-400">{a.summary}</p>
