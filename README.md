@@ -73,3 +73,29 @@ pytest -q
 ```
 
 GitHub Actions runs backend tests and a frontend production build on pushes and pull requests to `main`.
+
+
+## Quarterly results intelligence
+
+1. Upload a company's quarterly results PDF in **Documents**, using its NSE/BSE ticker.
+2. Select **Analyze uploaded quarterly results**.
+3. When `GEMINI_API_KEY` is configured, FINN asks the configured Gemini model to extract Revenue, EBITDA, PBT and PAT for the current quarter, previous quarter and year-ago quarter.
+4. FINN calculates QoQ and YoY percentage changes itself. Each observation is accepted only when the cited page exists in the uploaded document and the quoted evidence contains the reported number and matching source text.
+5. Missing or unsupported periods remain blank. Verify every extracted value against the original filing before relying on it.
+
+Without `GEMINI_API_KEY`, the endpoint returns relevant uploaded excerpts and does not invent extracted figures.
+
+Endpoint: `POST /api/results/analyze` with JSON body `{"ticker":"TCS.NS"}`.
+
+## Configurable market alerts
+
+The Alerts screen lets the user select a portfolio ticker, configure a daily price-move threshold, a volume-multiple threshold, and a baseline window (2–250 trading days). Volume is compared with prior sessions only; the current session is excluded from its own baseline.
+
+- `POST /api/alerts/evaluate` evaluates the selected ticker against the configured thresholds.
+- `average_days` controls the volume baseline.
+- Optional `observed_price_change_pct` and `observed_volume_multiple` fields provide deterministic simulation for testing; responses identify this as simulated data.
+- This prototype evaluates on request; it does not yet run a persistent background watcher or send push notifications.
+
+## Environment configuration
+
+Set `GEMINI_API_KEY` in the backend environment to enable evidence-grounded synthesis and quarterly metric extraction. Optionally set `GEMINI_MODEL` to choose a supported Gemini model. Never commit API keys to Git.
