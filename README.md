@@ -94,7 +94,7 @@ The Alerts screen lets the user select a portfolio ticker, configure a daily pri
 - `POST /api/alerts/evaluate` evaluates the selected ticker against the configured thresholds.
 - `average_days` controls the volume baseline.
 - Optional `observed_price_change_pct` and `observed_volume_multiple` fields provide deterministic simulation for testing; responses identify this as simulated data.
-- This prototype evaluates on request; it does not yet run a persistent background watcher or send push notifications.
+- The Alerts view can auto-check the selected ticker every 15 minutes while the browser tab is open. It uses end-of-day data and the backend cache; it does not run a persistent server-side watcher or send notifications when the app is closed.
 
 ## Environment configuration
 
