@@ -4,7 +4,7 @@ FINN is a mobile-first investment intelligence prototype for the ENAM AI Enginee
 
 ## Repository status
 
-This repository is the canonical source for the project. The initial local prototype includes a Next.js frontend and FastAPI backend. The current MVP must clearly distinguish live provider data, cached data and illustrative demo content.
+This repository is the canonical source for the project. The current MVP includes a responsive Next.js frontend and FastAPI backend, portfolio market data, an NSE announcement digest, configurable alerts, primary-source discovery, document-grounded research and quarterly-results extraction. Live data, cached data, source-unavailable states and illustrative demo content are kept distinct.
 
 ## Local development
 
@@ -15,7 +15,7 @@ cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+python -m uvicorn app.main:app --reload --port 8000
 ```
 
 ### Frontend
@@ -35,13 +35,15 @@ Open http://localhost:3000. API docs: http://localhost:8000/docs.
 - Research answers must be grounded in uploaded primary-source documents, with page citations. Missing evidence must be stated.
 - FINN is an engineering prototype, not investment advice.
 
-## Planned engineering work
+## Current implementation and known limitations
 
-1. Cache and throttle market-data requests; expose freshness and provider status.
-2. Keep alert evaluation independently testable using supplied observations, while retaining live evaluation mode.
-3. Implement verified corporate-announcement ingestion with source URLs, timestamps and deduplication.
-4. Persist uploaded documents and retrieval indexes.
-5. Add automated tests and deployment configuration.
+- Market data is end-of-day Yahoo Finance data via `yfinance`, cached for 15 minutes with provider-failure backoff. It is not a real-time quote feed.
+- NSE announcement ingestion uses public exchange JSON/RSS interfaces. These are unofficial interfaces and may be rate-limited or change.
+- Alert auto-watch runs every 15 minutes only while the Alerts view is open. There is no server-side scheduler or notification delivery when the app is closed.
+- Uploaded PDF text is indexed in process memory. Restarting the backend clears the retrieval index; uploaded files remain in the backend data directory but are not automatically re-indexed yet.
+- Scanned PDFs require OCR, which is not included.
+- Quarterly figures require a configured Gemini API key and are first-pass extraction only. Every number must be checked against its cited filing page.
+- Screener discovery finds document links but does not guarantee completeness or publisher authenticity. Verify that each opened document is a company/exchange primary source.
 
 ## Corporate announcement digest
 
