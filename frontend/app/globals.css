@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #081321; color: #e8edf4; font-family: Arial, Helvetica, sans-serif; }
+.panel { background: linear-gradient(145deg, rgba(22,39,60,.96), rgba(13,27,44,.96)); border: 1px solid rgba(148,163,184,.15); border-radius: 18px; }
+.pill { border: 1px solid rgba(164,214,94,.25); background: rgba(164,214,94,.09); color: #bce58a; border-radius: 999px; padding: 5px 10px; font-size: 11px; font-weight: 700; }
+.btn { border-radius: 10px; padding: 10px 14px; font-size: 13px; font-weight: 700; }
+.btn-primary { background: #a4d65e; color: #14220a; }
+.btn-ghost { border: 1px solid #34465d; color: #cbd5e1; }
+.field { width: 100%; background: #0b192a; border: 1px solid #34465d; border-radius: 10px; padding: 11px 12px; color: #e8edf4; outline: none; }
+.field:focus { border-color: #a4d65e; }
+.navitem { display:flex; align-items:center; gap:10px; padding:11px 12px; border-radius:10px; color:#94a3b8; font-size:13px; text-align:left; }
+.navitem.active { background:rgba(164,214,94,.12); color:#c7ee9d; }
+.metric { font-size:26px; font-weight:700; letter-spacing:-1px; }
