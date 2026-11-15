@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from app.announcements import _safe_attachment, fetch_portfolio_announcements
 from app.financials import build_results_prompt, parse_model_json, rank_financial_chunks, validate_results_payload
+from app.sources import extract_primary_document_links
 
 load_dotenv()
 
@@ -282,6 +283,8 @@ def evaluate_alert(config: AlertConfig):
 
 ANNOUNCEMENT_CACHE: dict[str, dict[str, Any]] = {}
 ANNOUNCEMENT_CACHE_TTL_SECONDS = 5 * 60
+SOURCE_CACHE: dict[str, dict[str, Any]] = {}
+SOURCE_CACHE_TTL_SECONDS = 6 * 60 * 60
 
 
 @app.get("/api/announcements")
@@ -324,6 +327,41 @@ def announcements(
         "payload": result,
     }
     return result
+
+
+@app.get("/api/sources/{ticker}")
+async def discover_company_sources(ticker: str):
+    """Find annual reports, concall transcripts and results links indexed by Screener."""
+    symbol = _ticker(ticker)
+    cached = SOURCE_CACHE.get(symbol)
+    now = time.monotonic()
+    if cached and now - cached["cached_at"] < SOURCE_CACHE_TTL_SECONDS:
+        return {**cached["payload"], "cache_status": "fresh_cache"}
+
+    slug = re.sub(r"\\.(NS|BO)$", "", symbol, flags=re.IGNORECASE)
+    page_url = f"https://www.screener.in/company/{quote(slug, safe='&-')}/"
+    try:
+        async with httpx.AsyncClient(
+            timeout=25,
+            follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 FINN research prototype/1.0"},
+        ) as client:
+            response = await client.get(page_url)
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, f"Screener source discovery unavailable: {str(exc)[:160]}")
+
+    links = extract_primary_document_links(response.text, str(response.url))
+    payload = {
+        "ticker": symbol,
+        "company_page": str(response.url),
+        "items": links,
+        "count": len(links),
+        "mode": "screener_index",
+        "note": "Screener is used as a document index. Opened links may point to company or exchange-hosted primary sources; verify the publisher before using a document for Pull research.",
+    }
+    SOURCE_CACHE[symbol] = {"cached_at": now, "payload": payload}
+    return {**payload, "cache_status": "live_fetch"}
 
 
 @app.post("/api/documents/upload")
