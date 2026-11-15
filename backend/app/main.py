@@ -161,7 +161,8 @@ def _fetch_market_data(symbol: str, average_days: int = 20) -> dict[str, Any]:
         "previous_close": round(float(previous["Close"]), 2),
         "price_change_pct": round(price_change, 2),
         "latest_volume": latest_volume,
-        "average_volume_20d": int(avg_vol),
+        "average_volume_baseline": int(avg_vol),
+        "baseline_days": average_days,
         "volume_multiple": round(volume_multiple, 2) if volume_multiple is not None else None,
         "as_of": hist.index[-1].isoformat(),
         "history": [
