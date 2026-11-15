@@ -31,6 +31,9 @@ app.add_middleware(
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ],
+    # GitHub Codespaces forwards the frontend through an app.github.dev origin.
+    # Restrict the regex to the standard Codespaces forwarded-port hostname.
+    allow_origin_regex=r"https://[a-zA-Z0-9-]+-3000\\.app\\.github\\.dev",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
