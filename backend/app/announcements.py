@@ -244,6 +244,10 @@ def fetch_portfolio_announcements(
 
     filtered = []
     for item in items:
+        # Enforce portfolio membership again after source normalization so
+        # fallback feeds and mocked/test adapters cannot leak other issuers.
+        if str(item.get("ticker") or "").upper() not in symbols:
+            continue
         timestamp = item.get("published_at")
         if timestamp:
             try:
