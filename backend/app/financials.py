@@ -9,6 +9,26 @@ METRICS = ("revenue", "ebitda", "pbt", "pat")
 PERIODS = ("current_quarter", "previous_quarter", "year_ago_quarter")
 
 
+def rank_financial_chunks(sources: list[dict[str, Any]], limit: int = 30) -> list[dict[str, Any]]:
+    """Prefer statement pages containing headline metrics and period labels."""
+    patterns = (
+        r"revenue|income from operations|total income",
+        r"ebitda|operating profit",
+        r"profit before tax|\\bpbt\\b",
+        r"profit after tax|\\bpat\\b|net profit",
+        r"quarter ended|three months ended|year ended",
+        r"consolidated|standalone",
+    )
+    ranked = []
+    for index, source in enumerate(sources):
+        text = source.get("text", "").lower()
+        score = sum(len(re.findall(pattern, text, flags=re.IGNORECASE)) for pattern in patterns)
+        ranked.append((score, -index, source))
+    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    chosen = [item[2] for item in ranked[:limit]]
+    return sorted(chosen, key=lambda item: (int(item.get("page", 0)), item.get("filename", "")))
+
+
 def build_results_prompt(ticker: str, sources: list[dict[str, Any]]) -> str:
     excerpts = "\n\n".join(
         f"[SOURCE: {s['filename']} | PAGE: {s['page']}]\n{s['text']}"
