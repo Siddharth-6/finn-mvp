@@ -114,6 +114,23 @@ export default function Home() {
     finally { setBusy(false); }
   }
 
+  async function analyzeFiling(tickerValue: string, sourceUrl: string) {
+    setBusy(true); setResultsAnalysis(null); setUploadTicker(tickerValue);
+    try {
+      const response = await fetch(`${getApiBase()}/api/results/analyze-filing`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker: tickerValue, source_url: sourceUrl }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Could not analyze filing');
+      setResultsAnalysis(data);
+      setTab('Documents');
+    } catch (error: any) {
+      setResultsAnalysis({ status: 'error', message: error.message });
+      setTab('Documents');
+    } finally { setBusy(false); }
+  }
+
   async function analyzeResults() {
     setBusy(true); setResultsAnalysis(null);
     try {
@@ -217,7 +234,7 @@ export default function Home() {
             <div className="space-y-3">{announcements.map(a => <article key={a.id} className="rounded-xl border border-slate-800 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3"><div className="font-semibold">{a.company} <span className="ml-1 text-xs font-normal text-slate-500">{a.ticker}</span></div><span className="pill">{a.priority} priority</span></div>
               <h3 className="mt-3 text-sm">{a.title}</h3><p className="mt-2 text-xs leading-5 text-slate-400">{a.summary}</p>
-              <div className="mt-3 flex flex-wrap items-center gap-3 text-[10px] text-slate-600"><span>{a.category}</span><span>{a.published_at ? new Date(a.published_at).toLocaleString() : 'Time unavailable'}</span><span>{a.exchange || 'NSE'}</span>{a.is_demo && <span className="text-amber-300">DEMO</span>}{a.source_url && <a className="text-lime-300 underline" href={a.source_url} target="_blank" rel="noreferrer">Open filing ↗</a>}</div>
+              <div className="mt-3 flex flex-wrap items-center gap-3 text-[10px] text-slate-600"><span>{a.category}</span><span>{a.published_at ? new Date(a.published_at).toLocaleString() : 'Time unavailable'}</span><span>{a.exchange || 'NSE'}</span>{a.is_demo && <span className="text-amber-300">DEMO</span>}{a.source_url && <a className="text-lime-300 underline" href={a.source_url} target="_blank" rel="noreferrer">Open filing ↗</a>}{a.source_url && a.category === 'results' && <button disabled={busy} onClick={() => analyzeFiling(a.ticker, a.source_url!)} className="text-lime-300 underline disabled:opacity-50">Analyze results</button>}</div>
             </article>)}</div>
           </div>}
 
