@@ -1,5 +1,10 @@
 # FINN — Financial Investment Intelligence
 
+## Submission links
+- Live app: https://finn-mvp.vercel.app/
+- Covering note template: see `COVERING_NOTE.md`
+
+
 FINN is a mobile-first investment intelligence prototype for the ENAM AI Engineer Build Challenge. It separates **Push** workflows (portfolio monitoring, announcements and alerts) from **Pull** workflows (company research grounded in primary-source documents).
 
 ## Repository status

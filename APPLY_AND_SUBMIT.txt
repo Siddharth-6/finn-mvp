@@ -1,0 +1,34 @@
+FINN — apply these files, redeploy, submit
+==========================================
+
+1) Copy/replace these paths into your local finn-mvp repo (keep folder structure):
+
+  backend/app/announcements.py          (already committed by you — keep latest)
+  backend/app/screener_fundamentals.py  (NEW)
+  backend/app/promises.py               (NEW)
+  backend/app/main.py                   (UPDATED)
+  backend/tests/test_brief_and_promises.py (NEW)
+  frontend/app/page.tsx                 (UPDATED)
+  COVERING_NOTE.md                      (NEW — paste into email)
+  README.md                             (UPDATED)
+  APPLY_AND_SUBMIT.txt                  (this file)
+
+2) Commit & push
+   git add -A
+   git commit -m "Complete ENAM flows: research brief, promised vs delivered, portfolio alerts, digest enrichments"
+   git push
+
+3) Wait for Render (API) + Vercel (frontend) to finish deploying.
+
+4) Quick verify on https://finn-mvp.vercel.app/
+   - Smart Digest (7d): filings appear; tap a results / mgmt-change card
+   - Research: enter TCS.NS → Full research brief → Promised vs delivered
+   - Alerts: Scan full portfolio tripwires
+
+5) Email assessment@enam.com
+   Subject: IIT Delhi – AI Engineer - 2027
+   Body: use COVERING_NOTE.md
+   Attach: Cursor/chat export links + deployed URL + repo URL
+
+Do NOT submit the Vercel preview URL with SSO login.
+Submit: https://finn-mvp.vercel.app/

@@ -20,6 +20,8 @@ from pydantic import BaseModel, Field
 from app.announcements import _safe_attachment, fetch_portfolio_announcements
 from app.financials import build_results_prompt, parse_model_json, rank_financial_chunks, validate_results_payload
 from app.sources import extract_primary_document_links
+from app.screener_fundamentals import company_brief, enrich_management_change
+from app.promises import promises_vs_delivery
 
 load_dotenv()
 
@@ -33,10 +35,10 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "https://finn-mvp.vercel.app",
     ],
-    # GitHub Codespaces forwards the frontend through an app.github.dev origin.
-    # Restrict the regex to the standard Codespaces forwarded-port hostname.
-    allow_origin_regex=r"https://[a-zA-Z0-9-]+-3000\.app\.github\.dev",
+    # GitHub Codespaces + Vercel preview deployments.
+    allow_origin_regex=r"https://([a-zA-Z0-9-]+-3000\.app\.github\.dev|finn[a-zA-Z0-9-]*\.vercel\.app)",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -322,6 +324,28 @@ def announcements(
         hours=hours,
         include_routine=include_routine,
     )
+    # Attach Push enrichments for the ENAM "love" examples.
+    name_by_ticker = {c["ticker"]: c["name"] for c in PORTFOLIO}
+    for item in result.get("items", []):
+        cat = item.get("category")
+        full = item["ticker"] if str(item.get("ticker", "")).endswith(".NS") else f"{item.get('ticker')}.NS"
+        company_name = name_by_ticker.get(full) or name_by_ticker.get(item.get("ticker")) or item.get("company") or ""
+        try:
+            if cat == "results" and item.get("priority") == "high":
+                brief = company_brief(full)
+                if brief.get("results"):
+                    item["enrichment"] = {"type": "results", "results": brief["results"]}
+            elif cat == "management_change":
+                item["enrichment"] = {
+                    "type": "management_change",
+                    "mgmt": enrich_management_change(
+                        item.get("title", ""),
+                        item.get("summary", ""),
+                        company_name,
+                    ),
+                }
+        except Exception:
+            continue
     result["cache_status"] = "live_fetch"
     ANNOUNCEMENT_CACHE[cache_key] = {
         "cached_at": now,
@@ -512,7 +536,7 @@ async def analyze_results_filing(req: ResultsFilingRequest):
     ticker = _ticker(req.ticker)
     safe_url = _safe_attachment(req.source_url)
     if not safe_url:
-        raise HTTPException(400, "Only verified NSE-hosted filing URLs can be analyzed.")
+        raise HTTPException(400, "Only verified NSE/BSE-hosted filing URLs can be analyzed.")
 
     try:
         async with httpx.AsyncClient(
@@ -525,7 +549,7 @@ async def analyze_results_filing(req: ResultsFilingRequest):
         # Do not allow an NSE URL to redirect the backend to an arbitrary host.
         redirected_url = _safe_attachment(str(response.url))
         if not redirected_url:
-            raise HTTPException(400, "NSE filing redirected outside approved exchange hosts.")
+            raise HTTPException(400, "Filing redirected outside approved exchange hosts.")
         safe_url = redirected_url
         content = response.content
     except httpx.HTTPError as exc:
@@ -575,16 +599,80 @@ async def research(req: ResearchRequest):
     ticker = _ticker(req.ticker)
     sources = retrieve(req.question, ticker)
     if not sources:
+        # Cold-start Pull: answer from filing-derived standardised statements.
+        try:
+            brief = company_brief(ticker)
+        except Exception as exc:
+            return {
+                "ticker": ticker,
+                "answer": (
+                    "I don't have uploaded primary-source passages yet, and could not load "
+                    f"standardised filings either ({str(exc)[:120]}). Upload an annual report "
+                    "or transcript PDF to continue."
+                ),
+                "sources": [],
+                "grounded": False,
+                "status": "needs_documents",
+                "brief": None,
+            }
+        q = req.question.lower()
+        parts = [f"Research brief for {brief['name']} (filing-derived standardised statements)."]
+        if any(k in q for k in ("business", "segment", "what does")):
+            parts.append(brief["business"].get("about") or "Business description unavailable.")
+        if any(k in q for k in ("financial", "snapshot", "ratio", "number", "revenue", "pat", "margin")):
+            cards = ", ".join(
+                f"{c['k']}: {c['v']}{c['u']}" for c in brief["financial"]["cards"] if c["v"] is not None
+            )
+            parts.append(f"Financial snapshot ({brief['financial'].get('year')}): {cards}")
+        if any(k in q for k in ("trajectory", "trend", "growth", "history", "cagr")):
+            parts.append("Trajectory: " + "; ".join(brief["trajectory"]["notes"] or ["n/a"]))
+        if any(k in q for k in ("debt", "balance", "leverage", "borrow")):
+            parts.append("Balance sheet: " + "; ".join(brief["balance"]["notes"] or ["n/a"]))
+        if any(k in q for k in ("cash", "fcf", "conversion")):
+            parts.append("Cash quality: " + "; ".join(brief["cash"]["notes"] or ["n/a"]))
+        if any(k in q for k in ("bull", "bear", "risk", "thesis", "case")):
+            parts.append("Bull: " + "; ".join(brief["bull_bear"]["bull"] or ["n/a"]))
+            parts.append("Bear: " + "; ".join(brief["bull_bear"]["bear"] or ["n/a"]))
+        if any(k in q for k in ("promis", "guid", "deliver", "narrative", "said", "management", "outlook")):
+            try:
+                promises = promises_vs_delivery(ticker)
+                parts.append("Promised vs delivered (transcript quotes):")
+                for call in promises.get("calls", [])[:3]:
+                    if call.get("no_explicit_guidance"):
+                        parts.append(f"- {call['call']}: management states it gives no explicit guidance.")
+                    for quote in call.get("quotes", [])[:2]:
+                        parts.append("- " + call["call"] + ': "' + quote + '"')
+                    if call.get("error"):
+                        parts.append(f"- {call['call']}: transcript unavailable ({call['error']})")
+                if promises.get("latest_reported"):
+                    m = promises["latest_reported"]
+                    metrics = ", ".join(
+                        f"{x['label']} {x['value']} (YoY {x['yoy']}%)"
+                        for x in m.get("metrics", []) if x.get("yoy") is not None
+                    )
+                    parts.append(f"Latest reported {m.get('quarter')}: {metrics}")
+            except Exception as exc:
+                parts.append(f"Could not load concall transcripts yet: {str(exc)[:120]}")
+        if len(parts) == 1:
+            cards = ", ".join(
+                f"{c['k']}: {c['v']}{c['u']}" for c in brief["financial"]["cards"] if c["v"] is not None
+            )
+            parts.append(brief["business"].get("about") or "")
+            parts.append(f"Financial snapshot: {cards}")
+            parts.append("Trajectory: " + "; ".join(brief["trajectory"]["notes"] or []))
+            parts.append("Bull: " + "; ".join(brief["bull_bear"]["bull"] or []))
+            parts.append("Bear: " + "; ".join(brief["bull_bear"]["bear"] or []))
+        parts.append(
+            "Grounding: standardised filing-derived statements / concall transcripts. "
+            "Upload the original PDFs for page-cited deep research."
+        )
         return {
             "ticker": ticker,
-            "answer": (
-                "I don't have relevant primary-source passages for this question yet. "
-                "Upload the company's annual report, quarterly results or earnings-call "
-                "transcript first. I won't fill the gap using general model knowledge."
-            ),
-            "sources": [],
-            "grounded": False,
-            "status": "needs_documents",
+            "answer": "\n\n".join(p for p in parts if p),
+            "sources": [{"document": "screener.in standardised filings", "page": "—", "excerpt": brief["grounding"]}],
+            "grounded": True,
+            "status": "brief_from_filings",
+            "brief": brief,
         }
 
     context = "\n\n".join(
@@ -654,3 +742,85 @@ async def research(req: ResearchRequest):
         "grounded": True,
         "status": "answered",
     }
+
+
+
+class PortfolioAlertConfig(BaseModel):
+    price_change_pct: float = Field(default=3.0, gt=0)
+    volume_multiple: float = Field(default=2.0, gt=0)
+    average_days: int = Field(default=20, ge=2, le=250)
+    hours: int = Field(default=168, ge=1, le=720)
+    filing_categories: list[str] = Field(
+        default_factory=lambda: [
+            "results", "M&A", "management_change", "fund_raise", "litigation", "dividend", "bonus_split", "pledging"
+        ]
+    )
+
+
+@app.get("/api/research/brief/{ticker}")
+def research_brief(ticker: str):
+    """Structured Pull view for any NSE ticker from filing-derived statements."""
+    symbol = _ticker(ticker)
+    try:
+        return company_brief(symbol)
+    except Exception as exc:
+        raise HTTPException(404, f"No fundamentals available for {symbol}: {str(exc)[:160]}")
+
+
+@app.get("/api/research/promises/{ticker}")
+def research_promises(ticker: str):
+    symbol = _ticker(ticker)
+    try:
+        return promises_vs_delivery(symbol)
+    except Exception as exc:
+        raise HTTPException(502, f"Could not build promises vs delivery: {str(exc)[:180]}")
+
+
+@app.post("/api/alerts/scan")
+def scan_portfolio_alerts(config: PortfolioAlertConfig):
+    """Portfolio-wide tripwires: unusual EOD moves + material filings."""
+    alerts: list[dict[str, Any]] = []
+    for company in PORTFOLIO:
+        symbol = company["ticker"]
+        try:
+            data = market_data(symbol, average_days=config.average_days)
+            reasons = []
+            if abs(data["price_change_pct"]) >= config.price_change_pct:
+                reasons.append(
+                    f"Daily price move {data['price_change_pct']}% crossed ±{config.price_change_pct}%"
+                )
+            if data.get("volume_multiple") is not None and data["volume_multiple"] >= config.volume_multiple:
+                reasons.append(
+                    f"Volume {data['volume_multiple']}x vs {config.average_days}-day average"
+                )
+            if reasons:
+                alerts.append({
+                    "kind": "market",
+                    "ticker": symbol,
+                    "company": company["name"],
+                    "reasons": reasons,
+                    "score": 50 + 10 * len(reasons) + min(abs(data["price_change_pct"]), 10),
+                    "market_data": data,
+                })
+        except Exception:
+            continue
+
+    digest = fetch_portfolio_announcements(
+        tickers=[c["ticker"] for c in PORTFOLIO],
+        hours=config.hours,
+        include_routine=False,
+    )
+    watch = set(config.filing_categories)
+    for item in digest.get("items", []):
+        if item.get("category") in watch and item.get("priority") in {"high", "medium"}:
+            full = item["ticker"] if str(item.get("ticker", "")).endswith(".NS") else f"{item.get('ticker')}.NS"
+            alerts.append({
+                "kind": "filing",
+                "ticker": full,
+                "company": item.get("company"),
+                "reasons": [item.get("category")],
+                "score": 70 if item.get("priority") == "high" else 55,
+                "item": item,
+            })
+    alerts.sort(key=lambda a: -a["score"])
+    return {"count": len(alerts), "alerts": alerts}
