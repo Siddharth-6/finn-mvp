@@ -27,7 +27,7 @@ export default function Home() {
   const [announcementNote, setAnnouncementNote] = useState('');
   const [announcementSource, setAnnouncementSource] = useState('');
   const [announcementErrors, setAnnouncementErrors] = useState<string[]>([]);
-  const [announcementHours, setAnnouncementHours] = useState('24');
+  const [announcementHours, setAnnouncementHours] = useState('168');
   const [includeRoutine, setIncludeRoutine] = useState(true);
   const [apiStatus, setApiStatus] = useState('Connecting');
   const [ticker, setTicker] = useState('TCS.NS');
@@ -52,7 +52,7 @@ export default function Home() {
   useEffect(() => {
     fetch(`${getApiBase()}/health`).then(r => r.ok ? setApiStatus('Connected') : setApiStatus('Unavailable')).catch(() => setApiStatus('Offline'));
     fetch(`${getApiBase()}/api/portfolio`).then(r => r.json()).then(d => setPortfolio(d.items || [])).catch(() => {});
-    loadAnnouncements('24', true);
+    loadAnnouncements('168', true);
   }, []);
 
   useEffect(() => {
