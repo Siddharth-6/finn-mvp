@@ -178,9 +178,18 @@ def _fetch_nse_rss(symbols: set[str]) -> list[dict[str, Any]]:
         description = (node.findtext("description") or "").strip()
         link = (node.findtext("link") or "").strip()
         combined = f"{title} {description} {link}"
-        symbol_match = re.search(r"\b([A-Z][A-Z0-9&-]{1,19})\b", title)
-        symbol = symbol_match.group(1) if symbol_match else ""
-        if symbol not in symbols:
+        # NSE's official RSS title is the issuer's full company name, not its
+        # trading symbol. The attachment filename commonly starts with the
+        # NSE symbol (for example TCS_15112026123456_Outcome.pdf). Resolve
+        # against the requested portfolio symbols rather than guessing the
+        # first uppercase word in the company name.
+        attachment_name = urlparse(link).path.rsplit("/", 1)[-1].upper()
+        symbol = ""
+        for candidate in sorted(symbols, key=len, reverse=True):
+            if re.match(rf"^{re.escape(candidate)}(?:_|-|\\.|$)", attachment_name):
+                symbol = candidate
+                break
+        if not symbol:
             continue
         raw_date = node.findtext("pubDate") or ""
         try:
